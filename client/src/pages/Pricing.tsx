@@ -1,4 +1,4 @@
-import { useMutation } from "@tantml:query/react-query";
+import { useMutation } from "@tanstack/react-query";
 import Header from "@/components/Header";
 import PricingSection from "@/components/PricingSection";
 import Footer from "@/components/Footer";
