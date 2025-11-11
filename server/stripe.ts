@@ -103,18 +103,18 @@ export async function setupStripeWebhooks(app: Express) {
                   status: subscription.status,
                   priceId: subscription.items.data[0]?.price.id || null,
                   productId: subscription.items.data[0]?.price.product as string || null,
-                  currentPeriodStart: new Date(subscription.current_period_start * 1000),
-                  currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-                  cancelAtPeriodEnd: subscription.cancel_at_period_end,
+                  currentPeriodStart: new Date((subscription as any).current_period_start * 1000),
+                  currentPeriodEnd: new Date((subscription as any).current_period_end * 1000),
+                  cancelAtPeriodEnd: (subscription as any).cancel_at_period_end,
                 })
                 .onConflictDoUpdate({
                   target: subscriptions.stripeSubscriptionId,
                   set: {
                     status: subscription.status,
                     priceId: subscription.items.data[0]?.price.id || null,
-                    currentPeriodStart: new Date(subscription.current_period_start * 1000),
-                    currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-                    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+                    currentPeriodStart: new Date((subscription as any).current_period_start * 1000),
+                    currentPeriodEnd: new Date((subscription as any).current_period_end * 1000),
+                    cancelAtPeriodEnd: (subscription as any).cancel_at_period_end,
                     updatedAt: new Date(),
                   },
                 });

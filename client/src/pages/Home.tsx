@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
 import PaletteGenerator from "@/components/PaletteGenerator";
@@ -6,49 +8,158 @@ import FeaturesSection from "@/components/FeaturesSection";
 import PricingSection from "@/components/PricingSection";
 import Footer from "@/components/Footer";
 import PaywallModal from "@/components/PaywallModal";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { isUnauthorizedError } from "@/lib/authUtils";
+
+interface UserStatus {
+  totalGenerations: number;
+  monthlyGenerations: number;
+  credits: number;
+  remainingGenerations: number;
+  hasSubscription: boolean;
+  subscriptionStatus: string | null;
+  isUnlimited: boolean;
+}
 
 export default function Home() {
-  const [generationsUsed, setGenerationsUsed] = useState(0);
+  const { user, isAuthenticated } = useAuth();
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [showPaywall, setShowPaywall] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [currentPalette, setCurrentPalette] = useState<any[]>([]);
 
-  const handleGenerate = () => {
-    if (generationsUsed >= 1) {
+  // Get user status
+  const { data: userStatus, refetch: refetchStatus } = useQuery<UserStatus>({
+    queryKey: ["/api/user/status"],
+    enabled: isAuthenticated,
+  });
+
+  // Generate palette mutation
+  const generateMutation = useMutation({
+    mutationFn: async (palette: any) => {
+      const res = await apiRequest("POST", "/api/generate", {
+        palette,
+        harmony: "complementary",
+      });
+      return await res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Palette Generated!",
+        description: "Your color palette has been created successfully.",
+      });
+      refetchStatus();
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      
+      if (error.message.includes("No generations remaining")) {
+        setShowPaywall(true);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to generate palette. Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+  });
+
+  // Create checkout session mutation
+  const checkoutMutation = useMutation({
+    mutationFn: async (priceId: string) => {
+      const res = await apiRequest("POST", "/api/checkout", { priceId });
+      return await res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      
+      toast({
+        title: "Error",
+        description: "Failed to create checkout session. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleGenerate = (palette?: any) => {
+    const paletteData = palette || currentPalette;
+    
+    if (!userStatus) return;
+    
+    if (userStatus.remainingGenerations === 0) {
       setShowPaywall(true);
-    } else {
-      setGenerationsUsed(prev => prev + 1);
+      return;
+    }
+    
+    setCurrentPalette(paletteData);
+    generateMutation.mutate(paletteData);
+  };
+
+  const handleSelectPlan = (planName: string) => {
+    // Map plan names to price IDs (these should match your Stripe dashboard)
+    const priceMap: Record<string, string> = {
+      "10 Pack": process.env.VITE_STRIPE_PRICE_10_PACK || "price_10pack",
+      "Pro": process.env.VITE_STRIPE_PRICE_PRO || "price_pro",
+      "Unlimited": process.env.VITE_STRIPE_PRICE_UNLIMITED || "price_unlimited",
+    };
+    
+    const priceId = priceMap[planName];
+    if (priceId) {
+      checkoutMutation.mutate(priceId);
     }
   };
 
-  const handleLogin = () => {
-    console.log('Login clicked');
-    setIsAuthenticated(true);
+  const handleLogout = () => {
+    window.location.href = "/api/logout";
   };
 
-  const handleLogout = () => {
-    console.log('Logout clicked');
-    setIsAuthenticated(false);
-    setGenerationsUsed(0);
-  };
+  const canGenerate = userStatus && userStatus.remainingGenerations !== 0;
 
   return (
     <div className="min-h-screen flex flex-col">
       <Header
-        generationsUsed={generationsUsed}
+        generationsUsed={userStatus?.totalGenerations || 0}
         maxFreeGenerations={1}
         isAuthenticated={isAuthenticated}
-        onLogin={handleLogin}
         onLogout={handleLogout}
       />
       
       <main className="flex-1">
-        <Hero onGenerateFree={handleGenerate} />
+        <Hero onGenerateFree={() => handleGenerate()} />
         <PaletteGenerator 
           onGenerate={handleGenerate}
-          disabled={generationsUsed >= 1}
+          disabled={!canGenerate}
         />
         <FeaturesSection />
-        <PricingSection />
+        <PricingSection onSelectPlan={handleSelectPlan} />
       </main>
 
       <Footer />
@@ -56,6 +167,7 @@ export default function Home() {
       <PaywallModal
         open={showPaywall}
         onOpenChange={setShowPaywall}
+        onSelectPlan={handleSelectPlan}
       />
     </div>
   );
