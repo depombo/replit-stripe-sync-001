@@ -51,23 +51,23 @@ export default function Header({
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <div className="flex items-center gap-8">
-          <Link href="/" data-testid="link-home">
-            <a className="flex items-center gap-2 hover-elevate rounded-md px-2 py-1 -mx-2">
+          <Link href="/">
+            <div className="flex items-center gap-2 hover-elevate rounded-md px-2 py-1 -mx-2 cursor-pointer" data-testid="link-home">
               <Palette className="h-6 w-6 text-primary" />
               <span className="font-display text-xl font-bold">PaletteForge</span>
-            </a>
+            </div>
           </Link>
 
           <nav className="hidden md:flex items-center gap-6">
-            <Link href="/" data-testid="link-nav-home">
-              <a className={`text-sm font-medium transition-colors hover:text-primary ${location === '/' ? 'text-foreground' : 'text-muted-foreground'}`}>
+            <Link href="/">
+              <span className={`text-sm font-medium transition-colors hover:text-primary cursor-pointer ${location === '/' ? 'text-foreground' : 'text-muted-foreground'}`} data-testid="link-nav-home">
                 Home
-              </a>
+              </span>
             </Link>
-            <Link href="/pricing" data-testid="link-nav-pricing">
-              <a className={`text-sm font-medium transition-colors hover:text-primary ${location === '/pricing' ? 'text-foreground' : 'text-muted-foreground'}`}>
+            <Link href="/pricing">
+              <span className={`text-sm font-medium transition-colors hover:text-primary cursor-pointer ${location === '/pricing' ? 'text-foreground' : 'text-muted-foreground'}`} data-testid="link-nav-pricing">
                 Pricing
-              </a>
+              </span>
             </Link>
           </nav>
         </div>
