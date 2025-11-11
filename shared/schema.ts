@@ -39,9 +39,9 @@ export const users = pgTable("users", {
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 
-// Stripe customers table - synced via stripe-sync-engine
+// Stripe customers table - synced via webhooks
 export const customers = pgTable("customers", {
-  id: varchar("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").references(() => users.id),
   stripeCustomerId: varchar("stripe_customer_id").notNull().unique(),
   email: varchar("email"),
@@ -51,9 +51,9 @@ export const customers = pgTable("customers", {
 
 export type Customer = typeof customers.$inferSelect;
 
-// Stripe subscriptions table - synced via stripe-sync-engine
+// Stripe subscriptions table - synced via webhooks
 export const subscriptions = pgTable("subscriptions", {
-  id: varchar("id").primaryKey(),
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   customerId: varchar("customer_id").references(() => customers.id).notNull(),
   stripeSubscriptionId: varchar("stripe_subscription_id").notNull().unique(),
   status: varchar("status").notNull(), // active, canceled, past_due, etc.

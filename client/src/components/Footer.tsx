@@ -8,10 +8,10 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-8">
           <div className="col-span-2 md:col-span-1">
             <Link href="/">
-              <a className="flex items-center gap-2 mb-4">
+              <div className="flex items-center gap-2 mb-4 cursor-pointer">
                 <Palette className="h-6 w-6 text-primary" />
                 <span className="font-display text-xl font-bold">PaletteForge</span>
-              </a>
+              </div>
             </Link>
             <p className="text-sm text-muted-foreground">
               Create beautiful color palettes in seconds
@@ -23,16 +23,16 @@ export default function Footer() {
             <ul className="space-y-2 text-sm">
               <li>
                 <Link href="/">
-                  <a className="text-muted-foreground hover:text-foreground transition-colors">
+                  <span className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                     Features
-                  </a>
+                  </span>
                 </Link>
               </li>
               <li>
                 <Link href="/pricing">
-                  <a className="text-muted-foreground hover:text-foreground transition-colors">
+                  <span className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                     Pricing
-                  </a>
+                  </span>
                 </Link>
               </li>
             </ul>
