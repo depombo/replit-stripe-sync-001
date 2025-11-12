@@ -104,11 +104,33 @@ export async function getOrCreateStripeCustomer(
   userId: string,
   email: string
 ): Promise<string> {
-  // Check if customer already exists in stripe.customers schema
-  const existingCustomer = await storage.getStripeCustomerByUserId(userId);
+  try {
+    // First try to check stripe.customers table (may not exist until first webhook)
+    const existingCustomer = await storage.getStripeCustomerByUserId(userId);
+    if (existingCustomer) {
+      return existingCustomer.id;
+    }
+  } catch (error: any) {
+    // Table doesn't exist yet, will query Stripe API instead
+    console.log('stripe.customers table not available, querying Stripe API directly');
+  }
 
-  if (existingCustomer) {
-    return existingCustomer.id;
+  // Search Stripe API for existing customer with this userId in metadata
+  try {
+    const customers = await stripe.customers.list({
+      email,
+      limit: 100,
+    });
+
+    const existingCustomer = customers.data.find(
+      (c) => c.metadata?.userId === userId
+    );
+
+    if (existingCustomer) {
+      return existingCustomer.id;
+    }
+  } catch (error) {
+    console.error('Error searching Stripe customers:', error);
   }
 
   // Create new Stripe customer (will be synced to stripe.customers by webhook)

@@ -126,9 +126,9 @@ export default function Home() {
   const handleSelectPlan = (planName: string) => {
     // Map plan names to price IDs (these should match your Stripe dashboard)
     const priceMap: Record<string, string> = {
-      "10 Pack": process.env.VITE_STRIPE_PRICE_10_PACK || "price_10pack",
-      "Pro": process.env.VITE_STRIPE_PRICE_PRO || "price_pro",
-      "Unlimited": process.env.VITE_STRIPE_PRICE_UNLIMITED || "price_unlimited",
+      "10 Pack": import.meta.env.VITE_STRIPE_PRICE_10_PACK || "price_10pack",
+      "Pro": import.meta.env.VITE_STRIPE_PRICE_PRO || "price_pro",
+      "Unlimited": import.meta.env.VITE_STRIPE_PRICE_UNLIMITED || "price_unlimited",
     };
     
     const priceId = priceMap[planName];
