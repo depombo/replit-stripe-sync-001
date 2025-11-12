@@ -82,84 +82,54 @@ export class DatabaseStorage implements IStorage {
 
   // Customer operations - query stripe.customers table directly
   async getStripeCustomerByUserId(userId: string): Promise<StripeCustomer | null> {
-    try {
-      const result = await pool.query(
-        `SELECT id, email, metadata 
-         FROM stripe.customers 
-         WHERE metadata->>'userId' = $1
-         LIMIT 1`,
-        [userId]
-      );
-      
-      if (result.rows.length === 0) {
-        return null;
-      }
-      
-      return result.rows[0] as StripeCustomer;
-    } catch (error: any) {
-      // Tables don't exist until first Stripe webhook event arrives
-      if (error.code === '42P01') {
-        console.log('stripe.customers table does not exist yet (waiting for first Stripe event)');
-        return null;
-      }
-      console.error('Error querying stripe.customers:', error);
+    const result = await pool.query(
+      `SELECT id, email, metadata 
+       FROM stripe.customers 
+       WHERE metadata->>'userId' = $1
+       LIMIT 1`,
+      [userId]
+    );
+    
+    if (result.rows.length === 0) {
       return null;
     }
+    
+    return result.rows[0] as StripeCustomer;
   }
 
   async getStripeCustomerById(stripeCustomerId: string): Promise<StripeCustomer | null> {
-    try {
-      const result = await pool.query(
-        `SELECT id, email, metadata 
-         FROM stripe.customers 
-         WHERE id = $1
-         LIMIT 1`,
-        [stripeCustomerId]
-      );
-      
-      if (result.rows.length === 0) {
-        return null;
-      }
-      
-      return result.rows[0] as StripeCustomer;
-    } catch (error: any) {
-      // Tables don't exist until first Stripe webhook event arrives
-      if (error.code === '42P01') {
-        console.log('stripe.customers table does not exist yet (waiting for first Stripe event)');
-        return null;
-      }
-      console.error('Error querying stripe.customers:', error);
+    const result = await pool.query(
+      `SELECT id, email, metadata 
+       FROM stripe.customers 
+       WHERE id = $1
+       LIMIT 1`,
+      [stripeCustomerId]
+    );
+    
+    if (result.rows.length === 0) {
       return null;
     }
+    
+    return result.rows[0] as StripeCustomer;
   }
 
   // Subscription operations - query stripe.subscriptions table directly
   // Note: Includes all valid paid states (active, trialing, past_due, unpaid)
   async getActiveSubscription(stripeCustomerId: string): Promise<StripeSubscription | null> {
-    try {
-      const result = await pool.query(
-        `SELECT id, customer, status, items, current_period_start, current_period_end
-         FROM stripe.subscriptions 
-         WHERE customer = $1 
-         AND status IN ('active', 'trialing', 'past_due', 'unpaid')
-         LIMIT 1`,
-        [stripeCustomerId]
-      );
-      
-      if (result.rows.length === 0) {
-        return null;
-      }
-      
-      return result.rows[0] as StripeSubscription;
-    } catch (error: any) {
-      // Tables don't exist until first Stripe webhook event arrives
-      if (error.code === '42P01') {
-        console.log('stripe.subscriptions table does not exist yet (waiting for first Stripe event)');
-        return null;
-      }
-      console.error('Error querying stripe.subscriptions:', error);
+    const result = await pool.query(
+      `SELECT id, customer, status, items, current_period_start, current_period_end
+       FROM stripe.subscriptions 
+       WHERE customer = $1 
+       AND status IN ('active', 'trialing', 'past_due', 'unpaid')
+       LIMIT 1`,
+      [stripeCustomerId]
+    );
+    
+    if (result.rows.length === 0) {
       return null;
     }
+    
+    return result.rows[0] as StripeSubscription;
   }
 
   // Generation operations
