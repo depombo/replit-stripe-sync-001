@@ -70,11 +70,14 @@ The application queries the `stripe` schema as the source of truth for customer 
 
 **Payment Processor**: Stripe with automated data synchronization via Stripe Sync Engine.
 
-**Stripe Sync Engine**: Runs on port 3001 using `@supabase/stripe-sync-engine` to automatically sync all Stripe data to PostgreSQL. The sync engine:
-- Automatically creates and manages Stripe webhooks using Replit's public URL
+**Stripe Sync Engine**: Integrated into the main Express application (port 5000) using `@supabase/stripe-sync-engine` to automatically sync all Stripe data to PostgreSQL. The sync engine:
+- Runs on the same port as the main application (required for Replit Autoscale Deployments)
+- Automatically creates and manages Stripe webhooks at `/stripe-webhooks` on the main domain
+- Uses automatic URL detection via `REPLIT_DOMAINS` environment variable for both development and production
 - Syncs all Stripe objects (customers, subscriptions, payments) to the `stripe` schema
-- Handles database migrations for Stripe schema tables
+- Handles database migrations for Stripe schema tables via the shared database pool
 - Provides real-time synchronization of Stripe events
+- Captures raw request bodies via global `express.json()` verify callback for webhook signature verification
 
 **Neon Database Compatibility**: Stripe Sync Engine migrations are designed for standard PostgreSQL with a "postgres" role. Since Neon uses "neondb_owner", a custom migration wrapper (`server/stripeMigrations.ts`) handles this incompatibility by:
 - Running official Stripe migrations and catching the expected "postgres role does not exist" error
