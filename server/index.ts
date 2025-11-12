@@ -14,19 +14,19 @@ declare global {
   }
 }
 
-// JSON parser with raw body capture for Stripe webhook verification
-app.use(express.json({
-  verify: (req: any, _res, buf) => {
-    req.rawBody = Buffer.from(buf);
-  }
-}));
-
-// Skip URL-encoded parser for Stripe webhook path to prevent rawBody mutation
+// Body parsing middleware with special handling for Stripe webhooks
+// Webhooks need raw body for signature verification, all other routes need JSON
 app.use((req, res, next) => {
   if (req.path === '/stripe-webhooks') {
-    return next(); // Skip urlencoded for Stripe webhooks
+    // For webhooks: use raw body parser
+    express.raw({ type: 'application/json' })(req, res, next);
+  } else {
+    // For all other routes: use JSON and URL-encoded parsers
+    express.json()(req, res, (err) => {
+      if (err) return next(err);
+      express.urlencoded({ extended: false })(req, res, next);
+    });
   }
-  express.urlencoded({ extended: false })(req, res, next);
 });
 
 app.use((req, res, next) => {

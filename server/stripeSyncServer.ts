@@ -151,28 +151,43 @@ export class StripeSyncServer {
 
   /**
    * Mounts the Stripe webhook handler on the provided Express app.
-   * Uses req.rawBody captured by the global express.json() middleware's verify callback.
+   * The raw body is available as req.body (Buffer) thanks to express.raw middleware.
    */
   private mountWebhook(app: Express): void {
     app.post(
       this.options.webhookPath,
       async (req, res) => {
+        // Debug logging
+        console.log('[Webhook] Received request');
+        console.log('[Webhook] Content-Type:', req.headers['content-type']);
+        console.log('[Webhook] Body type:', typeof req.body);
+        console.log('[Webhook] Is Buffer:', Buffer.isBuffer(req.body));
+        console.log('[Webhook] Body length:', req.body?.length);
+        
         const sig = req.headers['stripe-signature'];
         if (!sig || typeof sig !== 'string') {
+          console.error('[Webhook] Missing stripe-signature header');
           return res.status(400).send({ error: 'Missing stripe-signature header' });
         }
 
-        // Use the raw body captured by express.json's verify callback
-        const rawBody = req.rawBody;
+        // express.raw puts the raw body in req.body as a Buffer
+        const rawBody = req.body;
         if (!rawBody || !Buffer.isBuffer(rawBody)) {
+          console.error('[Webhook] Body is not a Buffer!', {
+            hasBody: !!rawBody,
+            bodyType: typeof rawBody,
+            isBuffer: Buffer.isBuffer(rawBody),
+            bodyConstructor: rawBody?.constructor?.name
+          });
           return res.status(400).send({ error: 'Missing raw body for signature verification' });
         }
 
         try {
           await this.stripeSync!.processWebhook(rawBody, sig);
+          console.log('[Webhook] Processing successful');
           return res.status(200).send({ received: true });
         } catch (error: any) {
-          console.error('Webhook processing error:', error);
+          console.error('[Webhook] Processing error:', error.message);
           return res.status(400).send({ error: error.message });
         }
       }
