@@ -64,15 +64,40 @@ app.use((req, res, next) => {
   let stripeSyncServer: StripeSyncServer | null = null;
   
   if (process.env.STRIPE_SECRET_KEY && process.env.DATABASE_URL) {
-    // Determine public URL (Replit provides REPLIT_DOMAINS)
-    const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
-    const publicUrl = replitDomain ? `https://${replitDomain}` : undefined;
+    // Determine public URL (Replit provides REPLIT_DOMAINS or allow override with PUBLIC_URL)
+    let publicUrl: string;
+    
+    if (process.env.PUBLIC_URL) {
+      // Allow override for local testing
+      publicUrl = process.env.PUBLIC_URL;
+      console.log(`Using PUBLIC_URL override: ${publicUrl}`);
+    } else {
+      const replitDomains = process.env.REPLIT_DOMAINS;
+      
+      if (!replitDomains) {
+        console.error('FATAL: REPLIT_DOMAINS environment variable is required for webhook setup');
+        console.error('This variable is automatically provided by Replit in both development and production');
+        console.error('For local testing, set PUBLIC_URL environment variable');
+        process.exit(1);
+      }
+      
+      // Parse REPLIT_DOMAINS (can be comma-separated string or JSON array)
+      let domain: string;
+      try {
+        const parsed = JSON.parse(replitDomains);
+        domain = Array.isArray(parsed) ? parsed[0] : replitDomains.split(',')[0];
+      } catch {
+        // Not JSON, treat as comma-separated string
+        domain = replitDomains.split(',')[0];
+      }
+      
+      publicUrl = `https://${domain}`;
+    }
     
     stripeSyncServer = new StripeSyncServer({
       databaseUrl: process.env.DATABASE_URL,
       stripeApiKey: process.env.STRIPE_SECRET_KEY,
       publicUrl,
-      ngrokAuthToken: process.env.NGROK_AUTH_TOKEN,
       webhookPath: '/stripe-webhooks',
       schema: 'stripe',
       expressApp: app, // Pass the Express app to mount routes on

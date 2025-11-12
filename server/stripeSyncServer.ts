@@ -2,14 +2,12 @@ import { StripeSync } from '@supabase/stripe-sync-engine';
 import { runStripeMigrations } from './stripeMigrations';
 import express, { Express } from 'express';
 import { type PoolConfig } from 'pg';
-import { createTunnel, NgrokTunnel } from './ngrok';
 import { createWebhook, deleteWebhook } from './stripeWebhook';
 
 export interface StripeSyncServerOptions {
   databaseUrl: string;
   stripeApiKey: string;
-  ngrokAuthToken?: string;
-  publicUrl?: string; // Use this instead of ngrok if provided
+  publicUrl: string; // Required - from REPLIT_DOMAINS env var
   webhookPath?: string;
   schema?: string;
   stripeApiVersion?: string;
@@ -27,8 +25,8 @@ export interface StripeSyncServerInfo {
 
 /**
  * Encapsulates the entire Stripe Sync orchestration:
- * - Creates or reuses ngrok tunnel
- * - Sets up or reuses Stripe webhook
+ * - Uses Replit's public URL (REPLIT_DOMAINS env var)
+ * - Sets up Stripe webhook
  * - Runs database migrations
  * - Mounts webhook handler on provided Express app
  */
@@ -40,7 +38,6 @@ export class StripeSyncServer {
     autoExpandLists: boolean;
     backfillRelatedEntities: boolean;
   };
-  private tunnel: NgrokTunnel | null = null;
   private webhookId: string | null = null;
   private stripeSync: StripeSync | null = null;
 
@@ -57,7 +54,7 @@ export class StripeSyncServer {
 
   /**
    * Starts the complete Stripe Sync infrastructure:
-   * 1. Gets public URL (from Replit or creates ngrok tunnel)
+   * 1. Uses public URL from Replit (REPLIT_DOMAINS env var)
    * 2. Runs database migrations
    * 3. Creates StripeSync instance
    * 4. Mounts webhook routes on Express app
@@ -67,22 +64,9 @@ export class StripeSyncServer {
    */
   async start(): Promise<StripeSyncServerInfo> {
     try {
-      // 1. Determine public URL
-      let publicUrl: string;
-      let tunnelUrl: string;
-      
-      if (this.options.publicUrl) {
-        publicUrl = this.options.publicUrl;
-        tunnelUrl = publicUrl;
-        console.log(`Using public URL: ${publicUrl}`);
-      } else if (this.options.ngrokAuthToken) {
-        this.tunnel = await createTunnel(5000, this.options.ngrokAuthToken);
-        publicUrl = this.tunnel.url;
-        tunnelUrl = this.tunnel.url;
-        console.log(`Created ngrok tunnel: ${tunnelUrl}`);
-      } else {
-        throw new Error('Either publicUrl or ngrokAuthToken must be provided');
-      }
+      // 1. Use Replit's public URL
+      const publicUrl = this.options.publicUrl;
+      console.log(`Using public URL: ${publicUrl}`);
       
       // Webhook URL is just publicUrl + path (no port - Autoscale only exposes one port)
       const webhookUrl = `${publicUrl}${this.options.webhookPath}`;
@@ -95,7 +79,7 @@ export class StripeSyncServer {
       } catch (error: any) {
         console.error('Database migration failed:', error);
         return {
-          tunnelUrl,
+          tunnelUrl: publicUrl,
           webhookUrl,
           status: 'degraded',
           reason: `Migration failed: ${error.message}`
@@ -113,7 +97,7 @@ export class StripeSyncServer {
           console.warn('⚠ Stripe webhook limit reached. App will run in degraded mode.');
           console.warn('⚠ Please delete unused webhooks from: https://dashboard.stripe.com/webhooks');
           return {
-            tunnelUrl,
+            tunnelUrl: publicUrl,
             webhookUrl,
             status: 'degraded',
             reason: 'Webhook limit reached. Please clean up old webhooks in Stripe Dashboard.'
@@ -147,7 +131,7 @@ export class StripeSyncServer {
       console.log(`Stripe Sync webhook mounted at ${this.options.webhookPath}`);
 
       return {
-        tunnelUrl,
+        tunnelUrl: publicUrl,
         webhookUrl,
         status: 'ready',
       };
@@ -157,8 +141,8 @@ export class StripeSyncServer {
       await this.stop();
       
       return {
-        tunnelUrl: '',
-        webhookUrl: '',
+        tunnelUrl: this.options.publicUrl,
+        webhookUrl: `${this.options.publicUrl}${this.options.webhookPath}`,
         status: 'degraded',
         reason: error instanceof Error ? error.message : 'Unknown error'
       };
@@ -198,7 +182,6 @@ export class StripeSyncServer {
   /**
    * Stops all services and cleans up resources:
    * 1. Deletes Stripe webhook endpoint
-   * 2. Closes ngrok tunnel
    */
   async stop(): Promise<void> {
     // Delete webhook endpoint to prevent accumulation
@@ -207,14 +190,6 @@ export class StripeSyncServer {
         await deleteWebhook(this.options.stripeApiKey, this.webhookId);
       } catch (error: any) {
         console.log(`⚠ Could not delete webhook: ${error.message || error}`);
-      }
-    }
-    // Close tunnel
-    if (this.tunnel) {
-      try {
-        await this.tunnel.close();
-      } catch (error) {
-        console.log('⚠ Could not close tunnel');
       }
     }
 

@@ -87,6 +87,11 @@ The application queries the `stripe` schema as the source of truth for customer 
 
 **Fail-Fast Startup**: The application requires Stripe to function and implements fail-fast startup behavior. If Stripe Sync Engine migrations fail or required environment variables are missing, the server terminates with `process.exit(1)` instead of starting without payment capabilities.
 
+**URL Detection**: The application uses Replit's `REPLIT_DOMAINS` environment variable for webhook URLs in both development and production. The variable is automatically provided by Replit:
+- Development: `.replit.dev` domain (e.g., `https://xxx.riker.replit.dev`)
+- Production: `.replit.app` domain (e.g., `https://yourapp.replit.app`)
+- For local testing outside Replit, set `PUBLIC_URL` environment variable to override automatic detection
+
 **Important Note**: Stripe test mode has a 16 webhook endpoint limit. If the Stripe Sync Engine fails to start with "maximum of 16 test webhook endpoints" error, clean up old webhooks using the Stripe API or dashboard before restarting.
 
 **Products**:
