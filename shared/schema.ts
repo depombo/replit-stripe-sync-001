@@ -107,19 +107,3 @@ export const userCredits = pgTable("user_credits", {
 });
 
 export type UserCredit = typeof userCredits.$inferSelect;
-
-// Webhook state tracking for Stripe Sync Engine
-// Stores the webhook endpoint configuration to enable reuse across restarts
-export const webhookState = pgTable("webhook_state", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  environment: varchar("environment").notNull(), // 'development' or 'production'
-  publicUrl: text("public_url").notNull().unique(),
-  webhookEndpointId: text("webhook_endpoint_id").notNull(),
-  webhookSecret: text("webhook_secret").notNull(),
-  webhookUrl: text("webhook_url").notNull(),
-  lastVerified: timestamp("last_verified").defaultNow(),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-export type WebhookState = typeof webhookState.$inferSelect;
