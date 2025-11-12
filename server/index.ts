@@ -1,33 +1,13 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { StripeSyncServer } from "./stripeSyncServer";
+import { StripeSyncHandler } from "./stripeSyncServer";
 
 const app = express();
 
-// Extend Express Request to include rawBody for Stripe webhook signature verification
-declare global {
-  namespace Express {
-    interface Request {
-      rawBody?: Buffer;
-    }
-  }
-}
-
-// Body parsing middleware with special handling for Stripe webhooks
-// Webhooks need raw body for signature verification, all other routes need JSON
-app.use((req, res, next) => {
-  if (req.path === '/stripe-webhooks') {
-    // For webhooks: use raw body parser
-    express.raw({ type: 'application/json' })(req, res, next);
-  } else {
-    // For all other routes: use JSON and URL-encoded parsers
-    express.json()(req, res, (err) => {
-      if (err) return next(err);
-      express.urlencoded({ extended: false })(req, res, next);
-    });
-  }
-});
+// Body parsing for all routes (except Stripe webhook which handles its own)
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -60,8 +40,8 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Start Stripe Sync Engine server if configured
-  let stripeSyncServer: StripeSyncServer | null = null;
+  // Start Stripe Sync Engine handler if configured
+  let stripeSyncHandler: StripeSyncHandler | null = null;
   
   if (process.env.STRIPE_SECRET_KEY && process.env.DATABASE_URL) {
     // Determine public URL (Replit provides REPLIT_DOMAINS or allow override with PUBLIC_URL)
@@ -94,7 +74,7 @@ app.use((req, res, next) => {
       publicUrl = `https://${domain}`;
     }
     
-    stripeSyncServer = new StripeSyncServer({
+    stripeSyncHandler = new StripeSyncHandler({
       databaseUrl: process.env.DATABASE_URL,
       stripeApiKey: process.env.STRIPE_SECRET_KEY,
       publicUrl,
@@ -103,7 +83,7 @@ app.use((req, res, next) => {
       expressApp: app, // Pass the Express app to mount routes on
     });
 
-    const syncInfo = await stripeSyncServer.start();
+    const syncInfo = await stripeSyncHandler.start();
     
     if (syncInfo.status === 'degraded') {
       console.warn('⚠ Stripe Sync Engine running in DEGRADED mode');
@@ -112,7 +92,7 @@ app.use((req, res, next) => {
       // In development, fail fast to catch issues early
       if (app.get("env") === "development") {
         console.error('FATAL (dev mode): Stripe Sync Engine failed to start properly');
-        await stripeSyncServer.stop(); // Clean up before exit
+        await stripeSyncHandler.stop(); // Clean up before exit
         process.exit(1);
       }
       
@@ -164,8 +144,8 @@ app.use((req, res, next) => {
   // Graceful shutdown
   const shutdown = async () => {
     log('Shutting down...');
-    if (stripeSyncServer) {
-      await stripeSyncServer.stop();
+    if (stripeSyncHandler) {
+      await stripeSyncHandler.stop();
     }
     process.exit(0);
   };

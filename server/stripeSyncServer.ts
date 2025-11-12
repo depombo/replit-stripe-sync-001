@@ -4,7 +4,7 @@ import express, { Express } from 'express';
 import { type PoolConfig } from 'pg';
 import { createWebhook, deleteWebhook } from './stripeWebhook';
 
-export interface StripeSyncServerOptions {
+export interface StripeSyncHandlerOptions {
   databaseUrl: string;
   stripeApiKey: string;
   publicUrl: string; // Required - from REPLIT_DOMAINS env var
@@ -16,7 +16,7 @@ export interface StripeSyncServerOptions {
   expressApp: Express; // Main Express app to mount routes on
 }
 
-export interface StripeSyncServerInfo {
+export interface StripeSyncHandlerInfo {
   tunnelUrl: string;
   webhookUrl: string;
   status: 'ready' | 'degraded';
@@ -30,8 +30,8 @@ export interface StripeSyncServerInfo {
  * - Runs database migrations
  * - Mounts webhook handler on provided Express app
  */
-export class StripeSyncServer {
-  private options: StripeSyncServerOptions & {
+export class StripeSyncHandler {
+  private options: StripeSyncHandlerOptions & {
     webhookPath: string;
     schema: string;
     stripeApiVersion: string;
@@ -41,7 +41,7 @@ export class StripeSyncServer {
   private webhookId: string | null = null;
   private stripeSync: StripeSync | null = null;
 
-  constructor(options: StripeSyncServerOptions) {
+  constructor(options: StripeSyncHandlerOptions) {
     this.options = {
       webhookPath: '/stripe-webhooks',
       schema: 'stripe',
@@ -62,7 +62,7 @@ export class StripeSyncServer {
    *
    * @returns Information about the running instance with status
    */
-  async start(): Promise<StripeSyncServerInfo> {
+  async start(): Promise<StripeSyncHandlerInfo> {
     try {
       // 1. Use Replit's public URL
       const publicUrl = this.options.publicUrl;
@@ -151,9 +151,13 @@ export class StripeSyncServer {
 
   /**
    * Mounts the Stripe webhook handler on the provided Express app.
-   * The raw body is available as req.body (Buffer) thanks to express.raw middleware.
+   * Applies raw body parser middleware for signature verification.
    */
   private mountWebhook(app: Express): void {
+    // Apply raw body parser ONLY to this webhook route
+    app.use(this.options.webhookPath, express.raw({ type: 'application/json' }));
+    
+    // Mount the webhook handler
     app.post(
       this.options.webhookPath,
       async (req, res) => {
