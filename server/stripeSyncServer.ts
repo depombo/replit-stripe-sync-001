@@ -1,7 +1,6 @@
 import { StripeSync } from '@supabase/stripe-sync-engine';
 import { runStripeMigrations } from './stripeMigrations';
 import express, { Express } from 'express';
-import { type Server } from 'http';
 import { type PoolConfig } from 'pg';
 import { createTunnel, NgrokTunnel } from './ngrok';
 import { createWebhook, deleteWebhook } from './stripeWebhook';
@@ -11,18 +10,17 @@ export interface StripeSyncServerOptions {
   stripeApiKey: string;
   ngrokAuthToken?: string;
   publicUrl?: string; // Use this instead of ngrok if provided
-  port?: number;
   webhookPath?: string;
   schema?: string;
   stripeApiVersion?: string;
   autoExpandLists?: boolean;
   backfillRelatedEntities?: boolean;
+  expressApp: Express; // Main Express app to mount routes on
 }
 
 export interface StripeSyncServerInfo {
   tunnelUrl: string;
   webhookUrl: string;
-  port: number;
   status: 'ready' | 'degraded';
   reason?: string;
 }
@@ -32,11 +30,10 @@ export interface StripeSyncServerInfo {
  * - Creates or reuses ngrok tunnel
  * - Sets up or reuses Stripe webhook
  * - Runs database migrations
- * - Starts Express server with webhook handler
+ * - Mounts webhook handler on provided Express app
  */
 export class StripeSyncServer {
   private options: StripeSyncServerOptions & {
-    port: number;
     webhookPath: string;
     schema: string;
     stripeApiVersion: string;
@@ -44,15 +41,12 @@ export class StripeSyncServer {
     backfillRelatedEntities: boolean;
   };
   private tunnel: NgrokTunnel | null = null;
-  private app: Express | null = null;
-  private server: Server | null = null;
   private webhookId: string | null = null;
   private stripeSync: StripeSync | null = null;
 
   constructor(options: StripeSyncServerOptions) {
     this.options = {
-      port: 3001,
-      webhookPath: '/webhooks',
+      webhookPath: '/stripe-webhooks',
       schema: 'stripe',
       stripeApiVersion: '2020-08-27',
       autoExpandLists: false,
@@ -64,9 +58,10 @@ export class StripeSyncServer {
   /**
    * Starts the complete Stripe Sync infrastructure:
    * 1. Gets public URL (from Replit or creates ngrok tunnel)
-   * 2. Creates Stripe webhook endpoint
-   * 3. Runs database migrations
-   * 4. Starts Express server
+   * 2. Runs database migrations
+   * 3. Creates StripeSync instance
+   * 4. Mounts webhook routes on Express app
+   * 5. Creates Stripe webhook endpoint
    *
    * @returns Information about the running instance with status
    */
@@ -81,7 +76,7 @@ export class StripeSyncServer {
         tunnelUrl = publicUrl;
         console.log(`Using public URL: ${publicUrl}`);
       } else if (this.options.ngrokAuthToken) {
-        this.tunnel = await createTunnel(this.options.port, this.options.ngrokAuthToken);
+        this.tunnel = await createTunnel(5000, this.options.ngrokAuthToken);
         publicUrl = this.tunnel.url;
         tunnelUrl = this.tunnel.url;
         console.log(`Created ngrok tunnel: ${tunnelUrl}`);
@@ -89,9 +84,25 @@ export class StripeSyncServer {
         throw new Error('Either publicUrl or ngrokAuthToken must be provided');
       }
       
-      const webhookUrl = `${publicUrl}:${this.options.port}${this.options.webhookPath}`;
+      // Webhook URL is just publicUrl + path (no port - Autoscale only exposes one port)
+      const webhookUrl = `${publicUrl}${this.options.webhookPath}`;
 
-      // 2. Create webhook and get the signing secret
+      // 2. Run migrations
+      try {
+        console.log('Running Stripe Sync database migrations...');
+        await runStripeMigrations(this.options.databaseUrl, this.options.schema);
+        console.log('✓ Database migrations complete');
+      } catch (error: any) {
+        console.error('Database migration failed:', error);
+        return {
+          tunnelUrl,
+          webhookUrl,
+          status: 'degraded',
+          reason: `Migration failed: ${error.message}`
+        };
+      }
+
+      // 3. Create webhook and get the signing secret
       let webhook;
       try {
         webhook = await createWebhook(this.options.stripeApiKey, webhookUrl);
@@ -104,7 +115,6 @@ export class StripeSyncServer {
           return {
             tunnelUrl,
             webhookUrl,
-            port: this.options.port,
             status: 'degraded',
             reason: 'Webhook limit reached. Please clean up old webhooks in Stripe Dashboard.'
           };
