@@ -14,19 +14,13 @@ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2025-10-29.clover",
 });
 
-// Price IDs for our products (these should match your Stripe dashboard)
+// Price IDs for subscription products
 export const PRICE_IDS = {
-  CREDITS_10: process.env.STRIPE_PRICE_10_PACK || "price_10pack",
   PRO_MONTHLY: process.env.STRIPE_PRICE_PRO || "price_pro",
   UNLIMITED_MONTHLY: process.env.STRIPE_PRICE_UNLIMITED || "price_unlimited",
 };
 
-// Credits mapping
-export const CREDITS_MAP: Record<string, number> = {
-  [PRICE_IDS.CREDITS_10]: 10,
-};
-
-// Subscription limits
+// Subscription limits (monthly generation limits)
 export const SUBSCRIPTION_LIMITS: Record<string, number> = {
   [PRICE_IDS.PRO_MONTHLY]: 100,
   [PRICE_IDS.UNLIMITED_MONTHLY]: -1, // -1 means unlimited
@@ -54,7 +48,7 @@ export async function getOrCreateStripeCustomer(
   return stripeCustomer.id;
 }
 
-// Helper to create checkout session
+// Helper to create checkout session (subscription only)
 export async function createCheckoutSession(
   customerId: string,
   priceId: string,
@@ -63,7 +57,7 @@ export async function createCheckoutSession(
 ) {
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
-    mode: CREDITS_MAP[priceId] ? "payment" : "subscription",
+    mode: "subscription",
     payment_method_types: ["card"],
     line_items: [
       {
