@@ -76,9 +76,12 @@ The application queries the `stripe` schema as the source of truth for customer 
 - Handles database migrations for Stripe schema tables
 - Provides real-time synchronization of Stripe events
 
+**Important Note**: Stripe test mode has a 16 webhook endpoint limit. If the Stripe Sync Engine fails to start with "maximum of 16 test webhook endpoints" error, clean up old webhooks using the Stripe API or dashboard before restarting.
+
 **Products**:
-- One-time credit packs (10 generations)
-- Recurring subscriptions (Pro: 100/month, Unlimited: unlimited)
+- One-time credit packs: 10 generations for $4.99 (STRIPE_PRICE_10_PACK)
+- Pro subscription: 100 generations/month for $9.99 (STRIPE_PRICE_PRO)
+- Unlimited subscription: Unlimited generations for $19.99 (STRIPE_PRICE_UNLIMITED)
 
 **Webhook Handling**: 
 - Stripe Sync Engine handles core webhook synchronization automatically
