@@ -96,7 +96,12 @@ export class DatabaseStorage implements IStorage {
       }
       
       return result.rows[0] as StripeCustomer;
-    } catch (error) {
+    } catch (error: any) {
+      // Tables don't exist until first Stripe webhook event arrives
+      if (error.code === '42P01') {
+        console.log('stripe.customers table does not exist yet (waiting for first Stripe event)');
+        return null;
+      }
       console.error('Error querying stripe.customers:', error);
       return null;
     }
@@ -117,7 +122,12 @@ export class DatabaseStorage implements IStorage {
       }
       
       return result.rows[0] as StripeCustomer;
-    } catch (error) {
+    } catch (error: any) {
+      // Tables don't exist until first Stripe webhook event arrives
+      if (error.code === '42P01') {
+        console.log('stripe.customers table does not exist yet (waiting for first Stripe event)');
+        return null;
+      }
       console.error('Error querying stripe.customers:', error);
       return null;
     }
@@ -141,7 +151,12 @@ export class DatabaseStorage implements IStorage {
       }
       
       return result.rows[0] as StripeSubscription;
-    } catch (error) {
+    } catch (error: any) {
+      // Tables don't exist until first Stripe webhook event arrives
+      if (error.code === '42P01') {
+        console.log('stripe.subscriptions table does not exist yet (waiting for first Stripe event)');
+        return null;
+      }
       console.error('Error querying stripe.subscriptions:', error);
       return null;
     }

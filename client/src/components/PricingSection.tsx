@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Check, Sparkles, Zap, Infinity } from "lucide-react";
+import { Check, Sparkles, Zap, Infinity, ShoppingBag } from "lucide-react";
 
 interface PricingSectionProps {
   onSelectPlan?: (plan: string) => void;
@@ -19,6 +19,21 @@ const pricingTiers = [
     ],
     cta: "Get Started",
     icon: Sparkles,
+    highlighted: false,
+  },
+  {
+    name: "Credit Pack",
+    price: "$4.99",
+    description: "10 generations",
+    features: [
+      "10 color palettes",
+      "No expiration",
+      "Use at your own pace",
+      "All harmony modes",
+      "Export as CSS/PNG",
+    ],
+    cta: "Buy Credits",
+    icon: ShoppingBag,
     highlighted: false,
   },
   {
@@ -69,7 +84,7 @@ export default function PricingSection({ onSelectPlan = (plan) => console.log(`S
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 max-w-7xl mx-auto">
           {pricingTiers.map((tier) => {
             const Icon = tier.icon;
             return (
