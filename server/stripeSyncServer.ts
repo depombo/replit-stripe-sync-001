@@ -157,13 +157,6 @@ export class StripeSyncServer {
     app.post(
       this.options.webhookPath,
       async (req, res) => {
-        // Debug logging
-        console.log('[Webhook] Received request');
-        console.log('[Webhook] Content-Type:', req.headers['content-type']);
-        console.log('[Webhook] Body type:', typeof req.body);
-        console.log('[Webhook] Is Buffer:', Buffer.isBuffer(req.body));
-        console.log('[Webhook] Body length:', req.body?.length);
-        
         const sig = req.headers['stripe-signature'];
         if (!sig || typeof sig !== 'string') {
           console.error('[Webhook] Missing stripe-signature header');
@@ -183,8 +176,13 @@ export class StripeSyncServer {
         }
 
         try {
+          // Process webhook with Stripe Sync Engine
           await this.stripeSync!.processWebhook(rawBody, sig);
-          console.log('[Webhook] Processing successful');
+          
+          // Parse the event for application-specific logic
+          const event = JSON.parse(rawBody.toString());
+          await this.handleApplicationLogic(event);
+          
           return res.status(200).send({ received: true });
         } catch (error: any) {
           console.error('[Webhook] Processing error:', error.message);
@@ -192,6 +190,49 @@ export class StripeSyncServer {
         }
       }
     );
+  }
+
+  /**
+   * Handle application-specific webhook logic (e.g., credit grants)
+   */
+  private async handleApplicationLogic(event: any): Promise<void> {
+    try {
+      // Import dynamically to avoid circular dependencies
+      const { CREDITS_MAP } = await import('./stripe');
+      const { storage } = await import('./storage');
+
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object;
+          
+          // If this is a one-time payment for credits, grant them
+          if (session.mode === 'payment' && session.metadata?.priceId) {
+            const priceId = session.metadata.priceId;
+            const creditsToAdd = CREDITS_MAP[priceId];
+            
+            if (creditsToAdd) {
+              // Get customer from stripe.customers table
+              const stripeCustomer = await storage.getStripeCustomerById(session.customer);
+              
+              if (stripeCustomer && stripeCustomer.metadata?.userId) {
+                await storage.addCredits(stripeCustomer.metadata.userId, creditsToAdd);
+                console.log(`[Webhook] Added ${creditsToAdd} credits to user ${stripeCustomer.metadata.userId}`);
+              } else {
+                console.warn('[Webhook] No userId found in customer metadata:', session.customer);
+              }
+            }
+          }
+          break;
+        }
+
+        default:
+          // All other events are handled by Stripe Sync Engine only
+          break;
+      }
+    } catch (error) {
+      console.error('[Webhook] Application logic error:', error);
+      // Don't throw - we don't want application logic errors to fail the webhook
+    }
   }
 
   /**
