@@ -5,10 +5,6 @@ import { StripeSyncHandler } from "./stripeSyncServer";
 
 const app = express();
 
-// Body parsing for all routes (except Stripe webhook which handles its own)
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -40,7 +36,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Start Stripe Sync Engine handler if configured
+  // Initialize Stripe Sync Engine handler if configured
   let stripeSyncHandler: StripeSyncHandler | null = null;
   
   if (process.env.STRIPE_SECRET_KEY && process.env.DATABASE_URL) {
@@ -80,9 +76,32 @@ app.use((req, res, next) => {
       publicUrl,
       webhookPath: '/stripe-webhooks',
       schema: 'stripe',
-      expressApp: app, // Pass the Express app to mount routes on
+      expressApp: app,
     });
 
+    // CRITICAL: Mount webhook routes BEFORE general JSON parser
+    // Webhook needs raw body for signature verification
+    stripeSyncHandler.mountWebhook(app);
+  } else {
+    // Stripe is required for this SaaS application - fail fast if not configured
+    console.error('FATAL: Stripe is required but STRIPE_SECRET_KEY or DATABASE_URL is missing');
+    process.exit(1);
+  }
+
+  // Body parsing for all routes EXCEPT Stripe webhook (which needs raw body)
+  app.use((req, res, next) => {
+    if (req.path === '/stripe-webhooks') {
+      // Skip JSON parsing for webhook - it already has raw body parser
+      return next();
+    }
+    express.json()(req, res, (err) => {
+      if (err) return next(err);
+      express.urlencoded({ extended: false })(req, res, next);
+    });
+  });
+
+  // Continue with Stripe initialization (migrations and webhook creation)
+  if (stripeSyncHandler) {
     const syncInfo = await stripeSyncHandler.start();
     
     if (syncInfo.status === 'degraded') {
@@ -103,10 +122,6 @@ app.use((req, res, next) => {
       log(`  - Webhook URL: ${syncInfo.webhookUrl}`);
       log(`  - Public URL: ${syncInfo.tunnelUrl}`);
     }
-  } else {
-    // Stripe is required for this SaaS application - fail fast if not configured
-    console.error('FATAL: Stripe is required but STRIPE_SECRET_KEY or DATABASE_URL is missing');
-    process.exit(1);
   }
 
   const server = await registerRoutes(app);

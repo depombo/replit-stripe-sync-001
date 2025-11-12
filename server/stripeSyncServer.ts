@@ -126,8 +126,7 @@ export class StripeSyncHandler {
         poolConfig,
       });
 
-      // 5. Mount webhook routes on the provided Express app
-      this.mountWebhook(this.options.expressApp);
+      // 5. Webhook routes already mounted (must be done before calling start())
       console.log(`Stripe Sync webhook mounted at ${this.options.webhookPath}`);
 
       return {
@@ -152,8 +151,9 @@ export class StripeSyncHandler {
   /**
    * Mounts the Stripe webhook handler on the provided Express app.
    * Applies raw body parser middleware for signature verification.
+   * IMPORTANT: Must be called BEFORE app.use(express.json()) to ensure raw body parsing.
    */
-  private mountWebhook(app: Express): void {
+  mountWebhook(app: Express): void {
     // Apply raw body parser ONLY to this webhook route
     app.use(this.options.webhookPath, express.raw({ type: 'application/json' }));
     
