@@ -3,12 +3,10 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { 
-  setupStripeWebhooks, 
   stripe, 
   getOrCreateStripeCustomer, 
   createCheckoutSession,
   PRICE_IDS,
-  CREDITS_MAP,
   SUBSCRIPTION_LIMITS 
 } from "./stripe";
 import { insertGenerationSchema } from "@shared/schema";
@@ -16,10 +14,6 @@ import { insertGenerationSchema } from "@shared/schema";
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
-  
-  // Setup webhook handler for application-specific logic
-  // (Stripe Sync Engine on port 3001 handles all data syncing)
-  await setupStripeWebhooks(app);
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -199,7 +193,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Note: Payment success is handled by our webhook handler at /api/stripe/webhook
+  // Note: Webhooks are handled by Stripe Sync Engine at /stripe-webhooks
   // Credit grants are processed when checkout.session.completed events arrive
 
   const httpServer = createServer(app);
