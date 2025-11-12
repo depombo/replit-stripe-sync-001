@@ -51,25 +51,45 @@ Generation tracking is enforced server-side, checking user credits, monthly gene
 **ORM**: Drizzle ORM for type-safe database queries and schema management.
 
 **Schema Design**:
+
+*Application Tables (public schema)*:
 - `users` - Stores user profiles from Replit Auth (mandatory table)
 - `sessions` - PostgreSQL session storage (mandatory table)
-- `customers` - Maps users to Stripe customer IDs
-- `subscriptions` - Tracks active Stripe subscriptions
-- `payments` - Records payment transactions
 - `generations` - Logs each palette generation with user association
 - `userCredits` - Manages credit balances for users
 
-The schema uses UUID primary keys and timestamps for audit trails. Foreign key relationships link users to their customers, subscriptions, and generations.
+*Stripe Schema Tables (managed by Stripe Sync Engine)*:
+- `stripe.customers` - Synced Stripe customer data with metadata containing userId mapping
+- `stripe.subscriptions` - Synced Stripe subscription data with status and pricing information
+- `stripe.payment_intents` - Payment transaction records
+- Other Stripe objects synced automatically
+
+The application queries the `stripe` schema as the source of truth for customer and subscription data, using JSONB metadata fields to link Stripe customers to application users.
 
 ### Payment Integration
 
-**Payment Processor**: Stripe with webhook-based synchronization.
+**Payment Processor**: Stripe with automated data synchronization via Stripe Sync Engine.
+
+**Stripe Sync Engine**: Runs on port 3001 using `@supabase/stripe-sync-engine` to automatically sync all Stripe data to PostgreSQL. The sync engine:
+- Automatically creates and manages Stripe webhooks using Replit's public URL
+- Syncs all Stripe objects (customers, subscriptions, payments) to the `stripe` schema
+- Handles database migrations for Stripe schema tables
+- Provides real-time synchronization of Stripe events
 
 **Products**:
 - One-time credit packs (10 generations)
 - Recurring subscriptions (Pro: 100/month, Unlimited: unlimited)
 
-**Webhook Handling**: The application listens for Stripe events to sync subscription status, process payments, and add credits. Events are verified using Stripe signature validation with raw request body parsing.
+**Webhook Handling**: 
+- Stripe Sync Engine handles core webhook synchronization automatically
+- Application webhook handler at `/api/stripe/webhook` processes application-specific logic (credit grants)
+- Events are verified using Stripe signature validation with raw request body parsing
+
+**Subscription Status**: The application treats multiple Stripe subscription statuses as valid paid states:
+- `active` - Normal active subscription
+- `trialing` - User in trial period
+- `past_due` - Payment failed but in grace period
+- `unpaid` - Subscription unpaid but not yet canceled
 
 **Checkout Flow**: Server-side checkout session creation with success/cancel URLs. The client redirects to Stripe Checkout, and webhooks handle post-payment processing.
 
@@ -101,6 +121,8 @@ The schema uses UUID primary keys and timestamps for audit trails. Foreign key r
 - `passport` - Authentication middleware
 - `stripe` - Stripe API client
 - `@stripe/stripe-js` & `@stripe/react-stripe-js` - Stripe frontend integration
+- `@supabase/stripe-sync-engine` - Automated Stripe data synchronization to PostgreSQL
+- `fastify` - Web framework for Stripe Sync Engine server
 
 **Routing & Forms**:
 - `wouter` - Lightweight router
