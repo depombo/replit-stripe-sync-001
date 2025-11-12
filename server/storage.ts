@@ -49,6 +49,14 @@ export interface IStorage {
   createGeneration(generation: InsertGeneration): Promise<Generation>;
   getUserGenerations(userId: string): Promise<Generation[]>;
   countUserGenerationsThisMonth(userId: string): Promise<number>;
+  
+  // Atomic check and create (prevents race conditions)
+  createGenerationIfAllowed(
+    userId: string,
+    generation: InsertGeneration,
+    isUnlimited: boolean,
+    maxGenerations: number
+  ): Promise<{ success: boolean; generation?: Generation; error?: string }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -132,6 +140,73 @@ export class DatabaseStorage implements IStorage {
       .values(generation)
       .returning();
     return created;
+  }
+
+  // Atomic check and create generation (prevents race conditions on quota limits)
+  async createGenerationIfAllowed(
+    userId: string,
+    generation: InsertGeneration,
+    isUnlimited: boolean,
+    maxGenerations: number
+  ): Promise<{ success: boolean; generation?: Generation; error?: string }> {
+    // Use a transaction with advisory lock to atomically check quota and insert
+    return await db.transaction(async (tx) => {
+      // Acquire transaction-level advisory lock on userId hash
+      // This ensures concurrent requests for the same user serialize
+      const userIdHash = Math.abs(userId.split('').reduce((hash, char) => {
+        return ((hash << 5) - hash) + char.charCodeAt(0);
+      }, 0));
+      
+      // Execute lock on the SAME transaction connection
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${userIdHash})`);
+      
+      // Now we have exclusive lock for this user - safe to check and insert
+      let currentCount: number;
+      
+      if (maxGenerations === 1) {
+        // Free tier - check total generations (lifetime)
+        const result = await tx
+          .select()
+          .from(generations)
+          .where(eq(generations.userId, userId));
+        currentCount = result.length;
+      } else {
+        // Paid tier - check monthly generations
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        
+        const result = await tx
+          .select()
+          .from(generations)
+          .where(
+            and(
+              eq(generations.userId, userId),
+              gte(generations.createdAt, startOfMonth)
+            )
+          );
+        currentCount = result.length;
+      }
+      
+      // Check if quota exceeded (unless unlimited)
+      if (!isUnlimited && currentCount >= maxGenerations) {
+        return {
+          success: false,
+          error: "No generations remaining"
+        };
+      }
+      
+      // Quota OK - create generation
+      const [newGeneration] = await tx
+        .insert(generations)
+        .values(generation)
+        .returning();
+      
+      return {
+        success: true,
+        generation: newGeneration
+      };
+      // Lock is automatically released when transaction commits/rolls back
+    });
   }
 
   async getUserGenerations(userId: string): Promise<Generation[]> {

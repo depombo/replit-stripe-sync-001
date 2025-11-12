@@ -113,7 +113,8 @@ export default function Home() {
     
     if (!userStatus) return;
     
-    if (userStatus.remainingGenerations === 0) {
+    // Block if user has no remaining generations (unless unlimited)
+    if (!userStatus.isUnlimited && userStatus.remainingGenerations <= 0) {
       setShowPaywall(true);
       return;
     }
@@ -140,7 +141,7 @@ export default function Home() {
     window.location.href = "/api/logout";
   };
 
-  const canGenerate = userStatus && userStatus.remainingGenerations !== 0;
+  const canGenerate = userStatus && (userStatus.isUnlimited || userStatus.remainingGenerations > 0);
 
   return (
     <div className="min-h-screen flex flex-col">

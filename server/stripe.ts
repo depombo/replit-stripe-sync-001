@@ -2,7 +2,7 @@ import Stripe from "stripe";
 import type { Express } from "express";
 import express from "express";
 import { db } from "./db";
-import { customers, subscriptions, userCredits } from "@shared/schema";
+import { customers, subscriptions } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { storage } from "./storage";
 

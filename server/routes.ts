@@ -86,26 +86,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.claims.sub;
       
-      // Check if user can generate
-      const statusResponse = await fetch(`${req.protocol}://${req.get('host')}/api/user/status`, {
-        headers: {
-          cookie: req.headers.cookie || '',
-        },
-      });
-      
-      if (!statusResponse.ok) {
-        return res.status(500).json({ message: "Failed to check generation status" });
-      }
-      
-      const status = await statusResponse.json();
-      
-      if (status.remainingGenerations === 0) {
-        return res.status(403).json({ 
-          message: "No generations remaining",
-          needsUpgrade: true 
-        });
-      }
-      
       // Validate request
       const result = insertGenerationSchema.safeParse({
         userId,
@@ -117,10 +97,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid request data" });
       }
       
-      // Create generation
-      const generation = await storage.createGeneration(result.data);
+      // Get user's subscription status to determine limits
+      const stripeCustomer = await storage.getStripeCustomerByUserId(userId);
+      let isUnlimited = false;
+      let maxGenerations = 1; // Default free tier limit
       
-      res.json(generation);
+      if (stripeCustomer) {
+        const subscription = await storage.getActiveSubscription(stripeCustomer.id);
+        if (subscription && subscription.items?.data?.[0]?.price?.id) {
+          const priceId = subscription.items.data[0].price.id;
+          const limit = SUBSCRIPTION_LIMITS[priceId];
+          if (limit !== undefined) {
+            maxGenerations = limit;
+            isUnlimited = limit === -1;
+          }
+        }
+      }
+      
+      // Atomically check quota and create generation (prevents race conditions)
+      const createResult = await storage.createGenerationIfAllowed(
+        userId,
+        result.data,
+        isUnlimited,
+        maxGenerations
+      );
+      
+      if (!createResult.success) {
+        return res.status(403).json({ 
+          message: createResult.error || "No generations remaining",
+          needsUpgrade: true 
+        });
+      }
+      
+      res.json(createResult.generation);
     } catch (error) {
       console.error("Error generating palette:", error);
       res.status(500).json({ message: "Failed to generate palette" });
