@@ -187,8 +187,8 @@ export class StripeSyncServer {
     if (this.webhookId) {
       try {
         await deleteWebhook(this.options.stripeApiKey, this.webhookId);
-      } catch (error) {
-        console.log('⚠ Could not delete webhook');
+      } catch (error: any) {
+        console.log(`⚠ Could not delete webhook: ${error.message || error}`);
       }
     }
     // Close tunnel

@@ -75,6 +75,7 @@ app.use((req, res, next) => {
       // In development, fail fast to catch issues early
       if (app.get("env") === "development") {
         console.error('FATAL (dev mode): Stripe Sync Engine failed to start properly');
+        await stripeSyncServer.stop(); // Clean up before exit
         process.exit(1);
       }
       
