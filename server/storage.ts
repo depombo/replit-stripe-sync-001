@@ -1,12 +1,10 @@
 import {
   users,
   generations,
-  userCredits,
   type User,
   type UpsertUser,
   type Generation,
   type InsertGeneration,
-  type UserCredit,
 } from "@shared/schema";
 import { db, pool } from "./db";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
@@ -51,11 +49,6 @@ export interface IStorage {
   createGeneration(generation: InsertGeneration): Promise<Generation>;
   getUserGenerations(userId: string): Promise<Generation[]>;
   countUserGenerationsThisMonth(userId: string): Promise<number>;
-  
-  // Credits operations
-  getUserCredits(userId: string): Promise<UserCredit | undefined>;
-  deductCredit(userId: string): Promise<void>;
-  addCredits(userId: string, amount: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -168,51 +161,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Credits operations
-  async getUserCredits(userId: string): Promise<UserCredit | undefined> {
-    const [credits] = await db
-      .select()
-      .from(userCredits)
-      .where(eq(userCredits.userId, userId));
-    
-    if (!credits) {
-      // Initialize with 0 credits
-      const [newCredits] = await db
-        .insert(userCredits)
-        .values({ userId, credits: 0 })
-        .returning();
-      return newCredits;
-    }
-    
-    return credits;
-  }
-
-  async deductCredit(userId: string): Promise<void> {
-    await db
-      .update(userCredits)
-      .set({ 
-        credits: sql`credits - 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(userCredits.userId, userId));
-  }
-
-  async addCredits(userId: string, amount: number): Promise<void> {
-    const existing = await this.getUserCredits(userId);
-    
-    if (existing) {
-      await db
-        .update(userCredits)
-        .set({ 
-          credits: sql`credits + ${amount}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(userCredits.userId, userId));
-    } else {
-      await db
-        .insert(userCredits)
-        .values({ userId, credits: amount });
-    }
-  }
 }
 
 export const storage = new DatabaseStorage();

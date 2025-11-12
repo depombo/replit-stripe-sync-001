@@ -97,13 +97,3 @@ export const insertGenerationSchema = createInsertSchema(generations).omit({
 
 export type InsertGeneration = z.infer<typeof insertGenerationSchema>;
 export type Generation = typeof generations.$inferSelect;
-
-// User credits tracking (for one-time purchases)
-export const userCredits = pgTable("user_credits", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").references(() => users.id).notNull().unique(),
-  credits: integer("credits").default(0).notNull(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-export type UserCredit = typeof userCredits.$inferSelect;

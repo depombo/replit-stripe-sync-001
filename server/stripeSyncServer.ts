@@ -193,42 +193,16 @@ export class StripeSyncServer {
   }
 
   /**
-   * Handle application-specific webhook logic (e.g., credit grants)
+   * Handle application-specific webhook logic (subscription-only app)
+   * Note: All subscription data is automatically synced by Stripe Sync Engine.
+   * This method is available for future custom logic if needed.
    */
   private async handleApplicationLogic(event: any): Promise<void> {
     try {
-      // Import dynamically to avoid circular dependencies
-      const { CREDITS_MAP } = await import('./stripe');
-      const { storage } = await import('./storage');
-
-      switch (event.type) {
-        case 'checkout.session.completed': {
-          const session = event.data.object;
-          
-          // If this is a one-time payment for credits, grant them
-          if (session.mode === 'payment' && session.metadata?.priceId) {
-            const priceId = session.metadata.priceId;
-            const creditsToAdd = CREDITS_MAP[priceId];
-            
-            if (creditsToAdd) {
-              // Get customer from stripe.customers table
-              const stripeCustomer = await storage.getStripeCustomerById(session.customer);
-              
-              if (stripeCustomer && stripeCustomer.metadata?.userId) {
-                await storage.addCredits(stripeCustomer.metadata.userId, creditsToAdd);
-                console.log(`[Webhook] Added ${creditsToAdd} credits to user ${stripeCustomer.metadata.userId}`);
-              } else {
-                console.warn('[Webhook] No userId found in customer metadata:', session.customer);
-              }
-            }
-          }
-          break;
-        }
-
-        default:
-          // All other events are handled by Stripe Sync Engine only
-          break;
-      }
+      // Currently no custom logic needed - subscriptions are handled automatically
+      // by Stripe Sync Engine syncing to the stripe schema
+      
+      // Future: Add custom logic here if needed (e.g., sending emails on subscription events)
     } catch (error) {
       console.error('[Webhook] Application logic error:', error);
       // Don't throw - we don't want application logic errors to fail the webhook
