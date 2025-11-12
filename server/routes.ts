@@ -17,7 +17,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
   
-  // Stripe webhook handler
+  // Setup webhook handler for application-specific logic
+  // (Stripe Sync Engine on port 3001 handles all data syncing)
   await setupStripeWebhooks(app);
 
   // Auth routes
@@ -48,15 +49,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userCredits = await storage.getUserCredits(userId);
       const credits = userCredits?.credits || 0;
       
-      // Check for active subscription
-      const customer = await storage.getCustomerByUserId(userId);
+      // Check for active subscription from stripe schema
+      const stripeCustomer = await storage.getStripeCustomerByUserId(userId);
       let subscription = null;
       let monthlyLimit = 1; // Default free limit
       
-      if (customer) {
-        subscription = await storage.getActiveSubscription(customer.id);
-        if (subscription && subscription.priceId) {
-          const limit = SUBSCRIPTION_LIMITS[subscription.priceId];
+      if (stripeCustomer) {
+        subscription = await storage.getActiveSubscription(stripeCustomer.id);
+        if (subscription && subscription.items?.data?.[0]?.price?.id) {
+          const priceId = subscription.items.data[0].price.id;
+          const limit = SUBSCRIPTION_LIMITS[priceId];
           if (limit !== undefined) {
             monthlyLimit = limit; // -1 for unlimited
           }
@@ -197,30 +199,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Webhook handler for payment success (handled by stripe-sync-engine)
-  // When a payment succeeds, we need to grant credits
-  app.post('/api/stripe/payment-success', async (req, res) => {
-    try {
-      const { customerId, priceId, amount } = req.body;
-      
-      // Get customer's user ID
-      const customer = await storage.getCustomerByStripeId(customerId);
-      if (!customer || !customer.userId) {
-        return res.status(404).json({ message: "Customer not found" });
-      }
-      
-      // If this is a one-time payment (credits), add credits
-      const creditsToAdd = CREDITS_MAP[priceId];
-      if (creditsToAdd) {
-        await storage.addCredits(customer.userId, creditsToAdd);
-      }
-      
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error processing payment success:", error);
-      res.status(500).json({ message: "Failed to process payment" });
-    }
-  });
+  // Note: Payment success is handled by our webhook handler at /api/stripe/webhook
+  // Credit grants are processed when checkout.session.completed events arrive
 
   const httpServer = createServer(app);
   return httpServer;

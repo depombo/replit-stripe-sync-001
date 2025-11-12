@@ -32,8 +32,10 @@ export const SUBSCRIPTION_LIMITS: Record<string, number> = {
   [PRICE_IDS.UNLIMITED_MONTHLY]: -1, // -1 means unlimited
 };
 
+// Minimal webhook handler for application-specific logic
+// Note: Stripe Sync Engine handles all data syncing to the stripe schema
+// This handler only processes events that require app-specific actions
 export async function setupStripeWebhooks(app: Express) {
-  // Stripe webhooks require raw body for signature verification
   app.post(
     "/api/stripe/webhook",
     express.raw({ type: "application/json" }),
@@ -58,100 +60,23 @@ export async function setupStripeWebhooks(app: Express) {
       }
 
       try {
-        // Handle the event
+        // Handle application-specific logic only
         switch (event.type) {
-          case "customer.created":
-          case "customer.updated": {
-            const customer = event.data.object as Stripe.Customer;
-            const userId = customer.metadata?.userId;
-            
-            if (userId) {
-              await db
-                .insert(customers)
-                .values({
-                  stripeCustomerId: customer.id,
-                  userId,
-                  email: customer.email || null,
-                })
-                .onConflictDoUpdate({
-                  target: customers.stripeCustomerId,
-                  set: {
-                    email: customer.email || null,
-                    updatedAt: new Date(),
-                  },
-                });
-            }
-            break;
-          }
-
-          case "customer.subscription.created":
-          case "customer.subscription.updated": {
-            const subscription = event.data.object as Stripe.Subscription;
-            
-            // Get customer from our DB
-            const [customer] = await db
-              .select()
-              .from(customers)
-              .where(eq(customers.stripeCustomerId, subscription.customer as string));
-
-            if (customer) {
-              await db
-                .insert(subscriptions)
-                .values({
-                  stripeSubscriptionId: subscription.id,
-                  customerId: customer.id,
-                  status: subscription.status,
-                  priceId: subscription.items.data[0]?.price.id || null,
-                  productId: subscription.items.data[0]?.price.product as string || null,
-                  currentPeriodStart: new Date((subscription as any).current_period_start * 1000),
-                  currentPeriodEnd: new Date((subscription as any).current_period_end * 1000),
-                  cancelAtPeriodEnd: (subscription as any).cancel_at_period_end,
-                })
-                .onConflictDoUpdate({
-                  target: subscriptions.stripeSubscriptionId,
-                  set: {
-                    status: subscription.status,
-                    priceId: subscription.items.data[0]?.price.id || null,
-                    currentPeriodStart: new Date((subscription as any).current_period_start * 1000),
-                    currentPeriodEnd: new Date((subscription as any).current_period_end * 1000),
-                    cancelAtPeriodEnd: (subscription as any).cancel_at_period_end,
-                    updatedAt: new Date(),
-                  },
-                });
-            }
-            break;
-          }
-
-          case "customer.subscription.deleted": {
-            const subscription = event.data.object as Stripe.Subscription;
-            
-            await db
-              .update(subscriptions)
-              .set({
-                status: "canceled",
-                updatedAt: new Date(),
-              })
-              .where(eq(subscriptions.stripeSubscriptionId, subscription.id));
-            break;
-          }
-
           case "checkout.session.completed": {
             const session = event.data.object as Stripe.Checkout.Session;
             
-            // If this is a one-time payment, grant credits
+            // If this is a one-time payment for credits, grant them
             if (session.mode === "payment" && session.metadata?.priceId) {
               const priceId = session.metadata.priceId;
               const creditsToAdd = CREDITS_MAP[priceId];
               
               if (creditsToAdd) {
-                // Get customer
-                const [customer] = await db
-                  .select()
-                  .from(customers)
-                  .where(eq(customers.stripeCustomerId, session.customer as string));
+                // Get customer by Stripe customer ID from stripe schema
+                const stripeCustomer = await storage.getStripeCustomerById(session.customer as string);
 
-                if (customer && customer.userId) {
-                  await storage.addCredits(customer.userId, creditsToAdd);
+                if (stripeCustomer && stripeCustomer.metadata?.userId) {
+                  await storage.addCredits(stripeCustomer.metadata.userId, creditsToAdd);
+                  console.log(`Added ${creditsToAdd} credits to user ${stripeCustomer.metadata.userId}`);
                 }
               }
             }
@@ -159,7 +84,8 @@ export async function setupStripeWebhooks(app: Express) {
           }
 
           default:
-            console.log(`Unhandled event type: ${event.type}`);
+            // All other events are handled by Stripe Sync Engine
+            break;
         }
 
         res.json({ received: true });
@@ -170,7 +96,7 @@ export async function setupStripeWebhooks(app: Express) {
     }
   );
 
-  console.log("Stripe webhook handler configured at /api/stripe/webhook");
+  console.log("Application webhook handler configured at /api/stripe/webhook");
 }
 
 // Helper to get or create Stripe customer
@@ -178,29 +104,19 @@ export async function getOrCreateStripeCustomer(
   userId: string,
   email: string
 ): Promise<string> {
-  // Check if customer already exists in our DB
-  const [existingCustomer] = await db
-    .select()
-    .from(customers)
-    .where(eq(customers.userId, userId));
+  // Check if customer already exists in stripe.customers schema
+  const existingCustomer = await storage.getStripeCustomerByUserId(userId);
 
   if (existingCustomer) {
-    return existingCustomer.stripeCustomerId;
+    return existingCustomer.id;
   }
 
-  // Create new Stripe customer
+  // Create new Stripe customer (will be synced to stripe.customers by webhook)
   const stripeCustomer = await stripe.customers.create({
     email,
     metadata: {
       userId,
     },
-  });
-
-  // Save to database
-  await db.insert(customers).values({
-    stripeCustomerId: stripeCustomer.id,
-    userId,
-    email,
   });
 
   return stripeCustomer.id;

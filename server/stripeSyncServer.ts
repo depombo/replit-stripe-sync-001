@@ -32,7 +32,14 @@ export interface StripeSyncServerInfo {
  * - Starts Express server with webhook handler
  */
 export class StripeSyncServer {
-  private options: Required<StripeSyncServerOptions>;
+  private options: StripeSyncServerOptions & {
+    port: number;
+    webhookPath: string;
+    schema: string;
+    stripeApiVersion: string;
+    autoExpandLists: boolean;
+    backfillRelatedEntities: boolean;
+  };
   private tunnel: NgrokTunnel | null = null;
   private app: Express | null = null;
   private server: Server | null = null;

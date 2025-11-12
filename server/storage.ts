@@ -1,21 +1,38 @@
 import {
   users,
-  customers,
-  subscriptions,
-  payments,
   generations,
   userCredits,
   type User,
   type UpsertUser,
-  type Customer,
-  type Subscription,
-  type Payment,
   type Generation,
   type InsertGeneration,
   type UserCredit,
 } from "@shared/schema";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
+
+// Types for Stripe schema data (from stripe.customers and stripe.subscriptions)
+export interface StripeCustomer {
+  id: string;
+  email: string | null;
+  metadata: Record<string, any>;
+}
+
+export interface StripeSubscription {
+  id: string;
+  customer: string;
+  status: string;
+  items: {
+    data: Array<{
+      price: {
+        id: string;
+        product: string;
+      }
+    }>;
+  };
+  current_period_start: number;
+  current_period_end: number;
+}
 
 // Interface for storage operations
 export interface IStorage {
@@ -23,12 +40,12 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   
-  // Customer operations
-  getCustomerByUserId(userId: string): Promise<Customer | undefined>;
-  getCustomerByStripeId(stripeCustomerId: string): Promise<Customer | undefined>;
+  // Customer operations (query stripe.customers schema)
+  getStripeCustomerByUserId(userId: string): Promise<StripeCustomer | null>;
+  getStripeCustomerById(stripeCustomerId: string): Promise<StripeCustomer | null>;
   
-  // Subscription operations
-  getActiveSubscription(customerId: string): Promise<Subscription | undefined>;
+  // Subscription operations (query stripe.subscriptions schema)
+  getActiveSubscription(stripeCustomerId: string): Promise<StripeSubscription | null>;
   
   // Generation operations
   createGeneration(generation: InsertGeneration): Promise<Generation>;
@@ -63,35 +80,71 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  // Customer operations
-  async getCustomerByUserId(userId: string): Promise<Customer | undefined> {
-    const [customer] = await db
-      .select()
-      .from(customers)
-      .where(eq(customers.userId, userId));
-    return customer;
-  }
-
-  async getCustomerByStripeId(stripeCustomerId: string): Promise<Customer | undefined> {
-    const [customer] = await db
-      .select()
-      .from(customers)
-      .where(eq(customers.stripeCustomerId, stripeCustomerId));
-    return customer;
-  }
-
-  // Subscription operations
-  async getActiveSubscription(customerId: string): Promise<Subscription | undefined> {
-    const [subscription] = await db
-      .select()
-      .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.customerId, customerId),
-          eq(subscriptions.status, 'active')
-        )
+  // Customer operations - query stripe.customers table directly
+  async getStripeCustomerByUserId(userId: string): Promise<StripeCustomer | null> {
+    try {
+      const result = await pool.query(
+        `SELECT id, email, metadata 
+         FROM stripe.customers 
+         WHERE metadata->>'userId' = $1
+         LIMIT 1`,
+        [userId]
       );
-    return subscription;
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+      
+      return result.rows[0] as StripeCustomer;
+    } catch (error) {
+      console.error('Error querying stripe.customers:', error);
+      return null;
+    }
+  }
+
+  async getStripeCustomerById(stripeCustomerId: string): Promise<StripeCustomer | null> {
+    try {
+      const result = await pool.query(
+        `SELECT id, email, metadata 
+         FROM stripe.customers 
+         WHERE id = $1
+         LIMIT 1`,
+        [stripeCustomerId]
+      );
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+      
+      return result.rows[0] as StripeCustomer;
+    } catch (error) {
+      console.error('Error querying stripe.customers:', error);
+      return null;
+    }
+  }
+
+  // Subscription operations - query stripe.subscriptions table directly
+  // Note: Includes all valid paid states (active, trialing, past_due, unpaid)
+  async getActiveSubscription(stripeCustomerId: string): Promise<StripeSubscription | null> {
+    try {
+      const result = await pool.query(
+        `SELECT id, customer, status, items, current_period_start, current_period_end
+         FROM stripe.subscriptions 
+         WHERE customer = $1 
+         AND status IN ('active', 'trialing', 'past_due', 'unpaid')
+         LIMIT 1`,
+        [stripeCustomerId]
+      );
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+      
+      return result.rows[0] as StripeSubscription;
+    } catch (error) {
+      console.error('Error querying stripe.subscriptions:', error);
+      return null;
+    }
   }
 
   // Generation operations
