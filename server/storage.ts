@@ -159,8 +159,6 @@ export class DatabaseStorage implements IStorage {
     
     return result.length;
   }
-
-  // Credits operations
 }
 
 export const storage = new DatabaseStorage();

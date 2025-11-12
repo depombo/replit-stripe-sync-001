@@ -39,14 +39,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get this month's generations
       const monthlyGenerations = await storage.countUserGenerationsThisMonth(userId);
       
-      // Get credits
-      const userCredits = await storage.getUserCredits(userId);
-      const credits = userCredits?.credits || 0;
-      
       // Check for active subscription from stripe schema
       const stripeCustomer = await storage.getStripeCustomerByUserId(userId);
       let subscription = null;
-      let monthlyLimit = 1; // Default free limit
+      let monthlyLimit = 1; // Default free limit (1 free generation total)
       
       if (stripeCustomer) {
         subscription = await storage.getActiveSubscription(stripeCustomer.id);
@@ -59,7 +55,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Calculate remaining generations
+      // Calculate remaining generations based on subscription tier or free tier
       let remainingGenerations = 1 - totalGenerations; // Free tier: 1 generation total
       
       if (subscription) {
@@ -69,15 +65,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           remainingGenerations = monthlyLimit - monthlyGenerations;
         }
-      } else if (credits > 0) {
-        // Has credits
-        remainingGenerations = credits;
       }
       
       res.json({
         totalGenerations,
         monthlyGenerations,
-        credits,
         remainingGenerations,
         hasSubscription: !!subscription,
         subscriptionStatus: subscription?.status || null,
@@ -127,11 +119,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Create generation
       const generation = await storage.createGeneration(result.data);
-      
-      // Deduct credit if using credits (not subscription or free tier)
-      if (status.credits > 0 && !status.hasSubscription) {
-        await storage.deductCredit(userId);
-      }
       
       res.json(generation);
     } catch (error) {
@@ -194,7 +181,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Note: Webhooks are handled by Stripe Sync Engine at /stripe-webhooks
-  // Credit grants are processed when checkout.session.completed events arrive
+  // All subscription data is automatically synced to the stripe schema
 
   const httpServer = createServer(app);
   return httpServer;
