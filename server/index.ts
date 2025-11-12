@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { StripeSyncServer } from "./stripeSyncServer";
 
 const app = express();
 
@@ -47,6 +48,37 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Start Stripe Sync Engine server if configured
+  let stripeSyncServer: StripeSyncServer | null = null;
+  
+  if (process.env.STRIPE_SECRET_KEY && process.env.DATABASE_URL) {
+    try {
+      // Determine public URL (Replit provides REPLIT_DOMAINS)
+      const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
+      const publicUrl = replitDomain ? `https://${replitDomain}` : undefined;
+      
+      stripeSyncServer = new StripeSyncServer({
+        databaseUrl: process.env.DATABASE_URL,
+        stripeApiKey: process.env.STRIPE_SECRET_KEY,
+        publicUrl,
+        ngrokAuthToken: process.env.NGROK_AUTH_TOKEN,
+        port: 3001,
+        webhookPath: '/webhooks',
+        schema: 'stripe',
+      });
+
+      const syncInfo = await stripeSyncServer.start();
+      log(`Stripe Sync Engine running:`);
+      log(`  - Webhook URL: ${syncInfo.webhookUrl}`);
+      log(`  - Public URL: ${syncInfo.tunnelUrl}`);
+    } catch (error) {
+      console.error('Failed to start Stripe Sync Engine:', error);
+      log('Continuing without Stripe Sync Engine...');
+    }
+  } else {
+    log('Stripe Sync Engine disabled (missing STRIPE_SECRET_KEY or DATABASE_URL)');
+  }
+
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -78,4 +110,16 @@ app.use((req, res, next) => {
   }, () => {
     log(`serving on port ${port}`);
   });
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    log('Shutting down...');
+    if (stripeSyncServer) {
+      await stripeSyncServer.stop();
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 })();
