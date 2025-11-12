@@ -181,11 +181,8 @@ export class StripeSyncHandler {
 
         try {
           // Process webhook with Stripe Sync Engine
+          // All subscription data is automatically synced to the stripe schema
           await this.stripeSync!.processWebhook(rawBody, sig);
-          
-          // Parse the event for application-specific logic
-          const event = JSON.parse(rawBody.toString());
-          await this.handleApplicationLogic(event);
           
           return res.status(200).send({ received: true });
         } catch (error: any) {
@@ -194,23 +191,6 @@ export class StripeSyncHandler {
         }
       }
     );
-  }
-
-  /**
-   * Handle application-specific webhook logic (subscription-only app)
-   * Note: All subscription data is automatically synced by Stripe Sync Engine.
-   * This method is available for future custom logic if needed.
-   */
-  private async handleApplicationLogic(event: any): Promise<void> {
-    try {
-      // Currently no custom logic needed - subscriptions are handled automatically
-      // by Stripe Sync Engine syncing to the stripe schema
-      
-      // Future: Add custom logic here if needed (e.g., sending emails on subscription events)
-    } catch (error) {
-      console.error('[Webhook] Application logic error:', error);
-      // Don't throw - we don't want application logic errors to fail the webhook
-    }
   }
 
   /**
