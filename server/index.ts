@@ -67,9 +67,24 @@ app.use((req, res, next) => {
     });
 
     const syncInfo = await stripeSyncServer.start();
-    log(`Stripe Sync Engine running:`);
-    log(`  - Webhook URL: ${syncInfo.webhookUrl}`);
-    log(`  - Public URL: ${syncInfo.tunnelUrl}`);
+    
+    if (syncInfo.status === 'degraded') {
+      console.warn('⚠ Stripe Sync Engine running in DEGRADED mode');
+      console.warn(`⚠ Reason: ${syncInfo.reason}`);
+      
+      // In development, fail fast to catch issues early
+      if (app.get("env") === "development") {
+        console.error('FATAL (dev mode): Stripe Sync Engine failed to start properly');
+        process.exit(1);
+      }
+      
+      // In production, continue with limited functionality
+      console.warn('⚠ Continuing in production with limited Stripe functionality');
+    } else {
+      log(`Stripe Sync Engine running:`);
+      log(`  - Webhook URL: ${syncInfo.webhookUrl}`);
+      log(`  - Public URL: ${syncInfo.tunnelUrl}`);
+    }
   } else {
     // Stripe is required for this SaaS application - fail fast if not configured
     console.error('FATAL: Stripe is required but STRIPE_SECRET_KEY or DATABASE_URL is missing');

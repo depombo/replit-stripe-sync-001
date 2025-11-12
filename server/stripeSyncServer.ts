@@ -4,13 +4,7 @@ import express, { Express } from 'express';
 import { type Server } from 'http';
 import { type PoolConfig } from 'pg';
 import { createTunnel, NgrokTunnel } from './ngrok';
-import { createWebhook, deleteWebhook, listWebhooks, getWebhook } from './stripeWebhook';
-import { pool } from './db';
-import { webhookState } from '../shared/schema';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-
-const db = drizzle(pool);
+import { createWebhook, deleteWebhook } from './stripeWebhook';
 
 export interface StripeSyncServerOptions {
   databaseUrl: string;
@@ -31,13 +25,6 @@ export interface StripeSyncServerInfo {
   port: number;
   status: 'ready' | 'degraded';
   reason?: string;
-}
-
-interface WebhookConfig {
-  id: string;
-  secret: string;
-  url: string;
-  source: 'cache' | 'stripe' | 'created';
 }
 
 /**
@@ -75,20 +62,15 @@ export class StripeSyncServer {
   }
 
   /**
-   * Starts the complete Stripe Sync infrastructure with webhook reuse:
+   * Starts the complete Stripe Sync infrastructure:
    * 1. Gets public URL (from Replit or creates ngrok tunnel)
-   * 2. Checks for existing webhook in database cache
-   * 3. Validates cached webhook still exists in Stripe
-   * 4. Falls back to listing Stripe webhooks and reusing matching URL
-   * 5. Creates new webhook only if none found
-   * 6. Runs database migrations
-   * 7. Starts Express server
+   * 2. Creates Stripe webhook endpoint
+   * 3. Runs database migrations
+   * 4. Starts Express server
    *
    * @returns Information about the running instance with status
    */
   async start(): Promise<StripeSyncServerInfo> {
-    const environment = process.env.NODE_ENV || 'development';
-    
     try {
       // 1. Determine public URL
       let publicUrl: string;
@@ -109,10 +91,11 @@ export class StripeSyncServer {
       
       const webhookUrl = `${publicUrl}:${this.options.port}${this.options.webhookPath}`;
 
-      // 2. Get or create webhook (with reuse logic)
-      let webhook: WebhookConfig;
+      // 2. Create webhook and get the signing secret
+      let webhook;
       try {
-        webhook = await this.getOrCreateWebhook(webhookUrl, publicUrl, environment);
+        webhook = await createWebhook(this.options.stripeApiKey, webhookUrl);
+        this.webhookId = webhook.id;
       } catch (error: any) {
         // Handle webhook creation failures gracefully
         if (error.message?.includes('maximum') || error.code === 'resource_exhausted') {
@@ -129,7 +112,6 @@ export class StripeSyncServer {
         throw error; // Re-throw other errors
       }
       
-      this.webhookId = webhook.id;
       const webhookSecret = webhook.secret;
 
       // 3. Run migrations (custom implementation with Neon compatibility)
@@ -195,131 +177,20 @@ export class StripeSyncServer {
   }
 
   /**
-   * Gets or creates a webhook endpoint with intelligent reuse logic:
-   * 1. Check database cache for existing webhook
-   * 2. Verify cached webhook still exists in Stripe
-   * 3. List Stripe webhooks and find matching URL
-   * 4. Create new webhook only as last resort
-   */
-  private async getOrCreateWebhook(
-    webhookUrl: string,
-    publicUrl: string,
-    environment: string
-  ): Promise<WebhookConfig> {
-    // 1. Check database cache
-    const cached = await db
-      .select()
-      .from(webhookState)
-      .where(eq(webhookState.publicUrl, publicUrl))
-      .limit(1);
-
-    if (cached.length > 0) {
-      const cachedWebhook = cached[0];
-      console.log(`Found cached webhook: ${cachedWebhook.webhookEndpointId}`);
-      
-      // Verify it still exists in Stripe
-      try {
-        const stripeWebhook = await getWebhook(this.options.stripeApiKey, cachedWebhook.webhookEndpointId);
-        if (stripeWebhook && stripeWebhook.url === webhookUrl) {
-          console.log('✓ Reusing cached webhook endpoint');
-          
-          // Update last verified timestamp
-          await db
-            .update(webhookState)
-            .set({ lastVerified: new Date(), updatedAt: new Date() })
-            .where(eq(webhookState.id, cachedWebhook.id));
-          
-          return {
-            id: cachedWebhook.webhookEndpointId,
-            secret: cachedWebhook.webhookSecret,
-            url: cachedWebhook.webhookUrl,
-            source: 'cache',
-          };
-        }
-      } catch (error) {
-        console.log('⚠ Cached webhook no longer exists in Stripe, will create new one');
-        // Delete stale cache entry
-        await db.delete(webhookState).where(eq(webhookState.id, cachedWebhook.id));
-      }
-    }
-
-    // 2. List existing webhooks and find matching URL
-    try {
-      const existingWebhooks = await listWebhooks(this.options.stripeApiKey);
-      const matchingWebhook = existingWebhooks.find((wh: WebhookConfig) => wh.url === webhookUrl);
-      
-      if (matchingWebhook) {
-        console.log(`✓ Found existing Stripe webhook: ${matchingWebhook.id}`);
-        
-        // Cache it for future use
-        await db.insert(webhookState).values({
-          environment,
-          publicUrl,
-          webhookEndpointId: matchingWebhook.id,
-          webhookSecret: matchingWebhook.secret,
-          webhookUrl: matchingWebhook.url,
-          lastVerified: new Date(),
-        }).onConflictDoUpdate({
-          target: webhookState.publicUrl,
-          set: {
-            webhookEndpointId: matchingWebhook.id,
-            webhookSecret: matchingWebhook.secret,
-            webhookUrl: matchingWebhook.url,
-            lastVerified: new Date(),
-            updatedAt: new Date(),
-          },
-        });
-        
-        return {
-          id: matchingWebhook.id,
-          secret: matchingWebhook.secret,
-          url: matchingWebhook.url,
-          source: 'stripe',
-        };
-      }
-    } catch (error) {
-      console.log('⚠ Could not list existing webhooks:', error);
-    }
-
-    // 3. Create new webhook as last resort
-    console.log(`Creating Stripe webhook endpoint: ${webhookUrl}...`);
-    const webhook = await createWebhook(this.options.stripeApiKey, webhookUrl);
-    console.log(`✓ Stripe webhook created: ${webhook.id}`);
-    
-    // Cache the new webhook
-    await db.insert(webhookState).values({
-      environment,
-      publicUrl,
-      webhookEndpointId: webhook.id,
-      webhookSecret: webhook.secret,
-      webhookUrl,
-      lastVerified: new Date(),
-    }).onConflictDoUpdate({
-      target: webhookState.publicUrl,
-      set: {
-        webhookEndpointId: webhook.id,
-        webhookSecret: webhook.secret,
-        webhookUrl,
-        lastVerified: new Date(),
-        updatedAt: new Date(),
-      },
-    });
-    
-    return {
-      id: webhook.id,
-      secret: webhook.secret,
-      url: webhookUrl,
-      source: 'created',
-    };
-  }
-
-  /**
    * Stops all services and cleans up resources:
-   * 1. Closes ngrok tunnel
-   * 2. Closes Express server
-   * (NOTE: We do NOT delete the webhook so it can be reused)
+   * 1. Deletes Stripe webhook endpoint
+   * 2. Closes ngrok tunnel
+   * 3. Closes Express server
    */
   async stop(): Promise<void> {
+    // Delete webhook endpoint to prevent accumulation
+    if (this.webhookId) {
+      try {
+        await deleteWebhook(this.options.stripeApiKey, this.webhookId);
+      } catch (error) {
+        console.log('⚠ Could not delete webhook');
+      }
+    }
     // Close tunnel
     if (this.tunnel) {
       try {
@@ -344,7 +215,7 @@ export class StripeSyncServer {
       }
     }
 
-    console.log('✓ Cleanup complete (webhook endpoint preserved for reuse)');
+    console.log('✓ Cleanup complete');
   }
 
   /**
