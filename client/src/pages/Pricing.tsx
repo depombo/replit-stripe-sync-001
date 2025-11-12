@@ -52,7 +52,6 @@ export default function Pricing() {
     // Map plan names to price IDs
     const priceMap: Record<string, string> = {
       "Free": "",
-      "Credit Pack": import.meta.env.VITE_STRIPE_PRICE_10_PACK || "price_10pack",
       "Pro": import.meta.env.VITE_STRIPE_PRICE_PRO || "price_pro",
       "Unlimited": import.meta.env.VITE_STRIPE_PRICE_UNLIMITED || "price_unlimited",
     };

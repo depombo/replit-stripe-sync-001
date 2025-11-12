@@ -17,14 +17,6 @@ interface PaywallModalProps {
 
 const plans = [
   {
-    name: "10 Pack",
-    price: "$2.99",
-    generations: "10 generations",
-    features: ["10 color palettes", "All harmony modes", "Export options", "7 day access"],
-    icon: Sparkles,
-    popular: false,
-  },
-  {
     name: "Pro",
     price: "$9.99",
     priceLabel: "/month",
@@ -57,7 +49,7 @@ export default function PaywallModal({ open, onOpenChange, onSelectPlan = (plan)
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid md:grid-cols-3 gap-4 mt-6">
+        <div className="grid md:grid-cols-2 gap-4 mt-6">
           {plans.map((plan) => {
             const Icon = plan.icon;
             return (
