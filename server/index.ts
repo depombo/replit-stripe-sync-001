@@ -5,17 +5,29 @@ import { StripeSyncServer } from "./stripeSyncServer";
 
 const app = express();
 
-declare module 'http' {
-  interface IncomingMessage {
-    rawBody: unknown
+// Extend Express Request to include rawBody for Stripe webhook signature verification
+declare global {
+  namespace Express {
+    interface Request {
+      rawBody?: Buffer;
+    }
   }
 }
+
+// JSON parser with raw body capture for Stripe webhook verification
 app.use(express.json({
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
+  verify: (req: any, _res, buf) => {
+    req.rawBody = Buffer.from(buf);
   }
 }));
-app.use(express.urlencoded({ extended: false }));
+
+// Skip URL-encoded parser for Stripe webhook path to prevent rawBody mutation
+app.use((req, res, next) => {
+  if (req.path === '/stripe-webhooks') {
+    return next(); // Skip urlencoded for Stripe webhooks
+  }
+  express.urlencoded({ extended: false })(req, res, next);
+});
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -61,9 +73,9 @@ app.use((req, res, next) => {
       stripeApiKey: process.env.STRIPE_SECRET_KEY,
       publicUrl,
       ngrokAuthToken: process.env.NGROK_AUTH_TOKEN,
-      port: 3001,
-      webhookPath: '/webhooks',
+      webhookPath: '/stripe-webhooks',
       schema: 'stripe',
+      expressApp: app, // Pass the Express app to mount routes on
     });
 
     const syncInfo = await stripeSyncServer.start();

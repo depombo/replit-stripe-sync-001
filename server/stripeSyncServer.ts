@@ -90,7 +90,7 @@ export class StripeSyncServer {
       // 2. Run migrations
       try {
         console.log('Running Stripe Sync database migrations...');
-        await runStripeMigrations(this.options.databaseUrl, this.options.schema);
+        await runStripeMigrations(this.options.schema);
         console.log('✓ Database migrations complete');
       } catch (error: any) {
         console.error('Database migration failed:', error);
@@ -124,22 +124,6 @@ export class StripeSyncServer {
       
       const webhookSecret = webhook.secret;
 
-      // 3. Run migrations (custom implementation with Neon compatibility)
-      try {
-        console.log('Running Stripe Sync database migrations...');
-        await runStripeMigrations(this.options.schema);
-        console.log('✓ Database migrations complete');
-      } catch (error: any) {
-        console.error('⚠ Migration error:', error.message);
-        return {
-          tunnelUrl,
-          webhookUrl,
-          port: this.options.port,
-          status: 'degraded',
-          reason: `Migration failed: ${error.message}`
-        };
-      }
-
       // 4. Create StripeSync instance
       const poolConfig: PoolConfig = {
         max: 10,
@@ -158,17 +142,13 @@ export class StripeSyncServer {
         poolConfig,
       });
 
-      // 5. Start Express server
-      console.log(`Starting Stripe Sync server on port ${this.options.port}...`);
-      this.app = this.createExpressServer();
-      this.server = this.app.listen(this.options.port, '0.0.0.0', () => {
-        console.log(`✓ Stripe Sync server started on port ${this.options.port}`);
-      });
+      // 5. Mount webhook routes on the provided Express app
+      this.mountWebhook(this.options.expressApp);
+      console.log(`Stripe Sync webhook mounted at ${this.options.webhookPath}`);
 
       return {
         tunnelUrl,
         webhookUrl,
-        port: this.options.port,
         status: 'ready',
       };
     } catch (error) {
@@ -179,7 +159,6 @@ export class StripeSyncServer {
       return {
         tunnelUrl: '',
         webhookUrl: '',
-        port: this.options.port,
         status: 'degraded',
         reason: error instanceof Error ? error.message : 'Unknown error'
       };
@@ -187,10 +166,39 @@ export class StripeSyncServer {
   }
 
   /**
+   * Mounts the Stripe webhook handler on the provided Express app.
+   * Uses req.rawBody captured by the global express.json() middleware's verify callback.
+   */
+  private mountWebhook(app: Express): void {
+    app.post(
+      this.options.webhookPath,
+      async (req, res) => {
+        const sig = req.headers['stripe-signature'];
+        if (!sig || typeof sig !== 'string') {
+          return res.status(400).send({ error: 'Missing stripe-signature header' });
+        }
+
+        // Use the raw body captured by express.json's verify callback
+        const rawBody = req.rawBody;
+        if (!rawBody || !Buffer.isBuffer(rawBody)) {
+          return res.status(400).send({ error: 'Missing raw body for signature verification' });
+        }
+
+        try {
+          await this.stripeSync!.processWebhook(rawBody, sig);
+          return res.status(200).send({ received: true });
+        } catch (error: any) {
+          console.error('Webhook processing error:', error);
+          return res.status(400).send({ error: error.message });
+        }
+      }
+    );
+  }
+
+  /**
    * Stops all services and cleans up resources:
    * 1. Deletes Stripe webhook endpoint
    * 2. Closes ngrok tunnel
-   * 3. Closes Express server
    */
   async stop(): Promise<void> {
     // Delete webhook endpoint to prevent accumulation
@@ -210,55 +218,6 @@ export class StripeSyncServer {
       }
     }
 
-    // Close server
-    if (this.server) {
-      try {
-        await new Promise<void>((resolve, reject) => {
-          this.server!.close((err) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-        console.log('✓ Stripe Sync server stopped');
-      } catch (error) {
-        console.log('⚠ Server already stopped');
-      }
-    }
-
     console.log('✓ Cleanup complete');
-  }
-
-  /**
-   * Creates and configures the Express server with webhook handling.
-   */
-  private createExpressServer(): Express {
-    const app = express();
-
-    // Webhook route - needs raw body for signature verification
-    app.post(
-      this.options.webhookPath,
-      express.raw({ type: 'application/json' }),
-      async (req, res) => {
-        const sig = req.headers['stripe-signature'];
-        if (!sig || typeof sig !== 'string') {
-          return res.status(400).send({ error: 'Missing stripe-signature header' });
-        }
-
-        try {
-          await this.stripeSync!.processWebhook(req.body, sig);
-          return res.status(200).send({ received: true });
-        } catch (error: any) {
-          console.error('Webhook processing error:', error);
-          return res.status(400).send({ error: error.message });
-        }
-      }
-    );
-
-    // Health check
-    app.get('/health', async (req, res) => {
-      return res.status(200).send({ status: 'ok' });
-    });
-
-    return app;
   }
 }
