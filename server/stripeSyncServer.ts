@@ -1,4 +1,5 @@
-import { runMigrations, StripeSync } from '@supabase/stripe-sync-engine';
+import { StripeSync } from '@supabase/stripe-sync-engine';
+import { runStripeMigrations } from './stripeMigrations';
 import express, { Express } from 'express';
 import { type Server } from 'http';
 import { type PoolConfig } from 'pg';
@@ -95,12 +96,9 @@ export class StripeSyncServer {
       this.webhookId = webhook.id;
       const webhookSecret = webhook.secret;
 
-      // 3. Run migrations
+      // 3. Run migrations (custom implementation with Neon compatibility)
       console.log('Running Stripe Sync database migrations...');
-      await runMigrations({
-        databaseUrl: this.options.databaseUrl,
-        schema: this.options.schema,
-      });
+      await runStripeMigrations(this.options.schema);
       console.log('✓ Database migrations complete');
 
       // 4. Create StripeSync instance
