@@ -76,6 +76,14 @@ The application queries the `stripe` schema as the source of truth for customer 
 - Handles database migrations for Stripe schema tables
 - Provides real-time synchronization of Stripe events
 
+**Neon Database Compatibility**: Stripe Sync Engine migrations are designed for standard PostgreSQL with a "postgres" role. Since Neon uses "neondb_owner", a custom migration wrapper (`server/stripeMigrations.ts`) handles this incompatibility by:
+- Running official Stripe migrations and catching the expected "postgres role does not exist" error
+- Explicitly reassigning ownership of all schema objects (tables, functions) to neondb_owner
+- Granting necessary permissions after ownership correction
+- Failing fast on any unexpected migration errors
+
+**Fail-Fast Startup**: The application requires Stripe to function and implements fail-fast startup behavior. If Stripe Sync Engine migrations fail or required environment variables are missing, the server terminates with `process.exit(1)` instead of starting without payment capabilities.
+
 **Important Note**: Stripe test mode has a 16 webhook endpoint limit. If the Stripe Sync Engine fails to start with "maximum of 16 test webhook endpoints" error, clean up old webhooks using the Stripe API or dashboard before restarting.
 
 **Products**:
