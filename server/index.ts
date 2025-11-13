@@ -1,7 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { StripeSyncHandler } from "./stripeSyncServer";
+import { StripeAutoSync } from "@supabase/stripe-sync-engine";
 
 const app = express();
 
@@ -37,26 +37,23 @@ app.use((req, res, next) => {
 
 (async () => {
   // Initialize Stripe Sync Engine handler if configured
-  let stripeSyncHandler: StripeSyncHandler | null = null;
-  
+  let stripeAutoSync: StripeAutoSync | null = null;
+
   if (process.env.STRIPE_SECRET_KEY && process.env.DATABASE_URL) {
     // Determine public URL (Replit provides REPLIT_DOMAINS or allow override with PUBLIC_URL)
-    let publicUrl: string;
-    
-    if (process.env.PUBLIC_URL) {
-      // Allow override for local testing
-      publicUrl = process.env.PUBLIC_URL;
-      console.log(`Using PUBLIC_URL override: ${publicUrl}`);
-    } else {
-      const replitDomains = process.env.REPLIT_DOMAINS;
-      
-      if (!replitDomains) {
-        console.error('FATAL: REPLIT_DOMAINS environment variable is required for webhook setup');
-        console.error('This variable is automatically provided by Replit in both development and production');
-        console.error('For local testing, set PUBLIC_URL environment variable');
-        process.exit(1);
+    const getPublicUrl = (): string => {
+      if (process.env.PUBLIC_URL) {
+        // Allow override for local testing
+        console.log(`Using PUBLIC_URL override: ${process.env.PUBLIC_URL}`);
+        return process.env.PUBLIC_URL;
       }
-      
+
+      const replitDomains = process.env.REPLIT_DOMAINS;
+
+      if (!replitDomains) {
+        throw new Error('REPLIT_DOMAINS environment variable is required for webhook setup');
+      }
+
       // Parse REPLIT_DOMAINS (can be comma-separated string or JSON array)
       let domain: string;
       try {
@@ -66,62 +63,37 @@ app.use((req, res, next) => {
         // Not JSON, treat as comma-separated string
         domain = replitDomains.split(',')[0];
       }
-      
-      publicUrl = `https://${domain}`;
-    }
-    
-    stripeSyncHandler = new StripeSyncHandler({
+
+      return `https://${domain}`;
+    };
+
+    stripeAutoSync = new StripeAutoSync({
       databaseUrl: process.env.DATABASE_URL,
       stripeApiKey: process.env.STRIPE_SECRET_KEY,
-      publicUrl,
+      baseUrl: getPublicUrl,
       webhookPath: '/stripe-webhooks',
       schema: 'stripe',
-      expressApp: app,
     });
 
-    // CRITICAL: Mount webhook routes BEFORE general JSON parser
-    // Webhook needs raw body for signature verification
-    stripeSyncHandler.mountWebhook(app);
+    // Start Stripe Sync (creates webhook, mounts handler, and applies body parsing)
+    try {
+      const syncInfo = await stripeAutoSync.start(app);
+
+      log(`Stripe Sync Engine running:`);
+      log(`  - Webhook URL: ${syncInfo.webhookUrl}`);
+      log(`  - Public URL: ${syncInfo.baseUrl}`);
+      log(`  - UUID: ${syncInfo.webhookUuid}`);
+    } catch (error) {
+      console.error('FATAL: Failed to start Stripe Sync Engine:', error);
+      await stripeAutoSync.stop();
+      process.exit(1);
+    }
+
+    // Body parsing middleware is automatically applied by start()
   } else {
     // Stripe is required for this SaaS application - fail fast if not configured
     console.error('FATAL: Stripe is required but STRIPE_SECRET_KEY or DATABASE_URL is missing');
     process.exit(1);
-  }
-
-  // Body parsing for all routes EXCEPT Stripe webhook (which needs raw body)
-  app.use((req, res, next) => {
-    if (req.path === '/stripe-webhooks') {
-      // Skip JSON parsing for webhook - it already has raw body parser
-      return next();
-    }
-    express.json()(req, res, (err) => {
-      if (err) return next(err);
-      express.urlencoded({ extended: false })(req, res, next);
-    });
-  });
-
-  // Continue with Stripe initialization (migrations and webhook creation)
-  if (stripeSyncHandler) {
-    const syncInfo = await stripeSyncHandler.start();
-    
-    if (syncInfo.status === 'degraded') {
-      console.warn('⚠ Stripe Sync Engine running in DEGRADED mode');
-      console.warn(`⚠ Reason: ${syncInfo.reason}`);
-      
-      // In development, fail fast to catch issues early
-      if (app.get("env") === "development") {
-        console.error('FATAL (dev mode): Stripe Sync Engine failed to start properly');
-        await stripeSyncHandler.stop(); // Clean up before exit
-        process.exit(1);
-      }
-      
-      // In production, continue with limited functionality
-      console.warn('⚠ Continuing in production with limited Stripe functionality');
-    } else {
-      log(`Stripe Sync Engine running:`);
-      log(`  - Webhook URL: ${syncInfo.webhookUrl}`);
-      log(`  - Public URL: ${syncInfo.tunnelUrl}`);
-    }
   }
 
   const server = await registerRoutes(app);
@@ -159,8 +131,8 @@ app.use((req, res, next) => {
   // Graceful shutdown
   const shutdown = async () => {
     log('Shutting down...');
-    if (stripeSyncHandler) {
-      await stripeSyncHandler.stop();
+    if (stripeAutoSync) {
+      await stripeAutoSync.stop();
     }
     process.exit(0);
   };
